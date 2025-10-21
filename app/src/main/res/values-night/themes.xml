@@ -1,13 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- Base theme for the app -->
+    <!-- Dark Theme Overrides -->
     <style name="Theme.L0V3" parent="Theme.Material3.DayNight.NoActionBar">
         <!-- Status Bar -->
         <item name="android:statusBarColor">@color/background</item>
-        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:windowLightStatusBar">false</item>
         
         <!-- Navigation Bar -->
         <item name="android:navigationBarColor">@color/background</item>
-        <item name="android:windowLightNavigationBar">true</item>
+        <item name="android:windowLightNavigationBar">false</item>
     </style>
 </resources>

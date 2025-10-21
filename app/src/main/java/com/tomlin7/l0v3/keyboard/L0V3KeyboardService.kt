@@ -15,6 +15,9 @@ import androidx.compose.animation.core.*
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -30,8 +33,10 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -49,7 +54,9 @@ import com.tomlin7.l0v3.MainActivity
 import com.tomlin7.l0v3.api.GeminiService
 import com.tomlin7.l0v3.data.PreferencesRepository
 import com.tomlin7.l0v3.data.UserPreferences
+import com.tomlin7.l0v3.data.ThemeMode
 import com.tomlin7.l0v3.service.ScreenshotDetectionService
+import com.tomlin7.l0v3.ui.theme.L0V3Theme
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -133,11 +140,23 @@ class L0V3KeyboardService : InputMethodService(), LifecycleOwner {
             )
             
             setContent {
-                L0V3KeyboardTheme {
+                val userPreferences by preferencesRepository.userPreferencesFlow.collectAsState(
+                    initial = UserPreferences()
+                )
+                
+                val systemInDarkTheme = isSystemInDarkTheme()
+                val isDarkTheme = when (userPreferences.themeMode) {
+                    ThemeMode.LIGHT -> false
+                    ThemeMode.DARK -> true
+                    ThemeMode.SYSTEM -> systemInDarkTheme
+                }
+                
+                L0V3Theme(themeMode = userPreferences.themeMode) {
                     KeyboardContent(
                         state = keyboardState,
                         suggestions = replySuggestions,
                         errorMessage = errorMessage,
+                        isDarkTheme = isDarkTheme,
                         onHeartClick = ::onHeartButtonClicked,
                         onSuggestionClick = ::onSuggestionClicked,
                         onSettingsClick = ::openSettings,
@@ -276,6 +295,7 @@ fun KeyboardContent(
     state: L0V3KeyboardService.KeyboardState,
     suggestions: List<String>,
     errorMessage: String?,
+    isDarkTheme: Boolean,
     onHeartClick: () -> Unit,
     onSuggestionClick: (String) -> Unit,
     onSettingsClick: () -> Unit,
@@ -285,21 +305,14 @@ fun KeyboardContent(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .background(
-                brush = Brush.verticalGradient(
-                    colors = listOf(
-                        Color(0xFFFFF0F5),
-                        Color(0xFFFFE4E1),
-                        Color(0xFFFFF5EE)
-                    )
-                )
-            )
+            .background(MaterialTheme.colorScheme.background)
             .padding(16.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         when (state) {
             L0V3KeyboardService.KeyboardState.IDLE -> {
                 IdleState(
+                    isDarkTheme = isDarkTheme,
                     onHeartClick = onHeartClick,
                     onSettingsClick = onSettingsClick,
                     onSwitchKeyboard = onSwitchKeyboard,
@@ -313,13 +326,15 @@ fun KeyboardContent(
                 LoadingState("Generating replies...")
             }
             L0V3KeyboardService.KeyboardState.COOKING -> {
-                CookingState()
+                CookingState(isDarkTheme = isDarkTheme)
             }
             L0V3KeyboardService.KeyboardState.SHOWING_SUGGESTIONS -> {
                 SuggestionsState(
                     suggestions = suggestions,
                     onSuggestionClick = onSuggestionClick,
-                    onBackClick = onHeartClick
+                    onBackClick = onHeartClick,
+                    onSwitchKeyboard = onSwitchKeyboard,
+                    onBackspaceClick = onBackspaceClick
                 )
             }
             L0V3KeyboardService.KeyboardState.ERROR -> {
@@ -334,6 +349,7 @@ fun KeyboardContent(
 
 @Composable
 fun IdleState(
+    isDarkTheme: Boolean,
     onHeartClick: () -> Unit,
     onSettingsClick: () -> Unit,
     onSwitchKeyboard: () -> Unit,
@@ -341,86 +357,82 @@ fun IdleState(
 ) {
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
-        modifier = Modifier.padding(vertical = 16.dp)
+        modifier = Modifier.fillMaxWidth()
     ) {
-        Text(
-            text = "Type Less. Feel More.",
-            style = MaterialTheme.typography.bodyMedium,
-            color = Color(0xFFD946A6),
-            fontWeight = FontWeight.Medium
-        )
-        
         Spacer(modifier = Modifier.height(16.dp))
-        
-        // Heart button
-        Box(
-            modifier = Modifier
-                .size(80.dp)
-                .clip(CircleShape)
-                .background(
-                    brush = Brush.radialGradient(
-                        colors = listOf(
-                            Color(0xFFFF69B4),
-                            Color(0xFFD946A6)
-                        )
-                    )
-                )
-                .clickable(onClick = onHeartClick),
-            contentAlignment = Alignment.Center
-        ) {
-            Image(
-                painter = painterResource(id = R.drawable.heart),
-                contentDescription = "Generate replies",
-                modifier = Modifier.size(40.dp)
-            )
-        }
-        
-        Spacer(modifier = Modifier.height(8.dp))
         
         Text(
             text = "Take a screenshot",
-            style = MaterialTheme.typography.bodyMedium,
-            color = Color.Gray,
+            style = MaterialTheme.typography.bodyLarge,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center
         )
-        
+
         Spacer(modifier = Modifier.height(8.dp))
-        
+
         Text(
             text = "We'll do the rest",
             style = MaterialTheme.typography.bodySmall,
-            color = Color.Gray,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center
         )
-        
+
         Spacer(modifier = Modifier.height(16.dp))
+
+        Image(
+            painter = painterResource(
+                id = if (isDarkTheme) R.drawable.heart_transparent
+                     else R.drawable.heart_transparent_light
+            ),
+            contentDescription = "Generate replies",
+            modifier = Modifier.size(100.dp)
+        )
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        val isDarkTheme = MaterialTheme.colorScheme.background == Color(0xFF121212)
+        val softGreyColor = if (isDarkTheme) Color(0xFF2A2A2A) else Color(0xFFF5F5F5)
         
+
         // Bottom controls
         Row(
-            horizontalArrangement = Arrangement.SpaceEvenly,
-            modifier = Modifier.fillMaxWidth()
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            IconButton(onClick = onBackspaceClick) {
-                Icon(
-                    imageVector = Icons.AutoMirrored.Default.Backspace,
-                    contentDescription = "Backspace",
-                    tint = Color(0xFFD946A6)
-                )
-            }
-            
-            IconButton(onClick = onSwitchKeyboard) {
-                Icon(
-                    imageVector = Icons.Default.Keyboard,
-                    contentDescription = "Switch keyboard",
-                    tint = Color(0xFFD946A6)
-                )
-            }
-            
-            IconButton(onClick = onSettingsClick) {
+            // Backspace button (right)
+            IconButton(
+                onClick = onSettingsClick,
+                modifier = Modifier
+                    .size(48.dp)
+                    .background(
+                        color = softGreyColor,
+                        shape = RoundedCornerShape(12.dp)
+                    )
+            ) {
                 Icon(
                     imageVector = Icons.Default.Settings,
                     contentDescription = "Settings",
-                    tint = Color(0xFFD946A6)
+                    tint = MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.size(24.dp)
+                )
+            }
+
+            // Backspace button (right)
+            IconButton(
+                onClick = onBackspaceClick,
+                modifier = Modifier
+                    .size(48.dp)
+                    .background(
+                        color = softGreyColor,
+                        shape = RoundedCornerShape(12.dp)
+                    )
+            ) {
+                Icon(
+                    imageVector = Icons.AutoMirrored.Filled.Backspace,
+                    contentDescription = "Backspace",
+                    tint = MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.size(24.dp)
                 )
             }
         }
@@ -434,20 +446,20 @@ fun LoadingState(message: String) {
         modifier = Modifier.padding(32.dp)
     ) {
         CircularProgressIndicator(
-            color = Color(0xFFD946A6),
+            color = MaterialTheme.colorScheme.primary,
             modifier = Modifier.size(48.dp)
         )
         Spacer(modifier = Modifier.height(16.dp))
         Text(
             text = message,
             style = MaterialTheme.typography.bodyMedium,
-            color = Color.Gray
+            color = MaterialTheme.colorScheme.onSurfaceVariant
         )
     }
 }
 
 @Composable
-fun CookingState() {
+fun CookingState(isDarkTheme: Boolean) {
     val infiniteTransition = rememberInfiniteTransition(label = "cooking")
     val scale by infiniteTransition.animateFloat(
         initialValue = 1f,
@@ -463,10 +475,12 @@ fun CookingState() {
         horizontalAlignment = Alignment.CenterHorizontally,
         modifier = Modifier.padding(32.dp)
     ) {
-        Icon(
-            imageVector = Icons.Default.Favorite,
-            contentDescription = "Cooking",
-            tint = Color(0xFFD946A6),
+        Image(
+            painter = painterResource(
+                id = if (isDarkTheme) R.drawable.heart_transparent
+                else R.drawable.heart_transparent_light
+            ),
+            contentDescription = "Generate replies",
             modifier = Modifier
                 .size(64.dp)
                 .scale(scale)
@@ -477,7 +491,7 @@ fun CookingState() {
         Text(
             text = "Cooking...",
             style = MaterialTheme.typography.headlineSmall,
-            color = Color(0xFFD946A6),
+            color = MaterialTheme.colorScheme.primary,
             fontWeight = FontWeight.Bold,
             textAlign = TextAlign.Center
         )
@@ -485,9 +499,9 @@ fun CookingState() {
         Spacer(modifier = Modifier.height(8.dp))
         
         Text(
-            text = "AI is analyzing your screenshot",
+            text = "generating some rizz for you",
             style = MaterialTheme.typography.bodyMedium,
-            color = Color.Gray,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center
         )
     }
@@ -497,17 +511,13 @@ fun CookingState() {
 fun SuggestionsState(
     suggestions: List<String>,
     onSuggestionClick: (String) -> Unit,
-    onBackClick: () -> Unit
+    onBackClick: () -> Unit,
+    onSwitchKeyboard: () -> Unit,
+    onBackspaceClick: () -> Unit
 ) {
     Column(modifier = Modifier.fillMaxWidth()) {
-        Text(
-            text = "Choose a reply:",
-            style = MaterialTheme.typography.titleSmall,
-            color = Color(0xFFD946A6),
-            fontWeight = FontWeight.SemiBold,
-            modifier = Modifier.padding(bottom = 12.dp)
-        )
-        
+        Spacer(modifier = Modifier.height(12.dp))
+
         suggestions.forEachIndexed { index, suggestion ->
             SuggestionCard(
                 text = suggestion,
@@ -518,34 +528,152 @@ fun SuggestionsState(
             }
         }
         
-        Spacer(modifier = Modifier.height(12.dp))
+        Spacer(modifier = Modifier.height(16.dp))
         
-        TextButton(
-            onClick = onBackClick,
-            modifier = Modifier.align(Alignment.CenterHorizontally)
+        // Bottom row with keyboard, generate, and backspace buttons
+        val isDarkTheme = MaterialTheme.colorScheme.background == Color(0xFF121212)
+        val softGreyColor = if (isDarkTheme) Color(0xFF2A2A2A) else Color(0xFFF5F5F5)
+        
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            Text("Generate new replies", color = Color(0xFFD946A6))
+            // Keyboard switch button (left)
+            IconButton(
+                onClick = onSwitchKeyboard,
+                modifier = Modifier
+                    .size(48.dp)
+                    .background(
+                        color = softGreyColor,
+                        shape = RoundedCornerShape(12.dp)
+                    )
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Keyboard,
+                    contentDescription = "Switch keyboard",
+                    tint = MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.size(24.dp)
+                )
+            }
+            
+            // Generate more rizz button (center)
+            Button(
+                onClick = onBackClick,
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = softGreyColor
+                ),
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                Text(
+                    text = "Generate more rizz",
+                    color = MaterialTheme.colorScheme.onSurface,
+                    fontWeight = FontWeight.Medium
+                )
+            }
+            
+            // Backspace button (right)
+            IconButton(
+                onClick = onBackspaceClick,
+                modifier = Modifier
+                    .size(48.dp)
+                    .background(
+                        color = softGreyColor,
+                        shape = RoundedCornerShape(12.dp)
+                    )
+            ) {
+                Icon(
+                    imageVector = Icons.AutoMirrored.Filled.Backspace,
+                    contentDescription = "Backspace",
+                    tint = MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.size(24.dp)
+                )
+            }
         }
     }
 }
 
 @Composable
 fun SuggestionCard(text: String, onClick: () -> Unit) {
-    Card(
+    val interactionSource = remember { MutableInteractionSource() }
+    val isPressed by interactionSource.collectIsPressedAsState()
+    
+    // Animation for press effect
+    val scale by animateFloatAsState(
+        targetValue = if (isPressed) 0.95f else 1f,
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioMediumBouncy,
+            stiffness = Spring.StiffnessLow
+        ),
+        label = "scale"
+    )
+    
+    val glowAlpha by animateFloatAsState(
+        targetValue = if (isPressed) 0.4f else 0.2f,
+        animationSpec = tween(150),
+        label = "glow"
+    )
+    
+    val isDarkTheme = MaterialTheme.colorScheme.background == Color(0xFF121212)
+    val crimsonRed = Color(0xFFDC143C) // Crimson red color
+    
+    Box(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(onClick = onClick),
-        shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = Color.White
-        ),
-        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+            .graphicsLayer {
+                scaleX = scale
+                scaleY = scale
+            }
+            .shadow(
+                elevation = if (isPressed) 12.dp else 6.dp,
+                shape = RoundedCornerShape(20.dp),
+                ambientColor = crimsonRed.copy(alpha = glowAlpha * 0.3f),
+                spotColor = crimsonRed.copy(alpha = glowAlpha * 0.5f),
+                clip = false
+            )
+            .background(
+                brush = Brush.verticalGradient(
+                    colors = if (isDarkTheme) {
+                        listOf(
+                            Color(0x50DC143C), // Crimson with transparency
+                            Color(0x40DC143C),
+                            Color(0x30DC143C)
+                        )
+                    } else {
+                        listOf(
+                            Color(0x70DC143C), // More opaque crimson for light theme
+                            Color(0x60DC143C),
+                            Color(0x50DC143C)
+                        )
+                    }
+                ),
+                shape = RoundedCornerShape(20.dp)
+            )
+            .background(
+                brush = Brush.radialGradient(
+                    colors = listOf(
+                        crimsonRed.copy(alpha = 0.15f),
+                        Color.Transparent
+                    ),
+                    radius = 300f
+                ),
+                shape = RoundedCornerShape(20.dp)
+            )
+            .clickable(
+                interactionSource = interactionSource,
+                indication = null,
+                onClick = onClick
+            )
     ) {
         Text(
             text = text,
-            modifier = Modifier.padding(16.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(20.dp),
             style = MaterialTheme.typography.bodyMedium,
-            color = Color(0xFF1F1F1F)
+            color = Color.White, // White text for good contrast against crimson
+            fontWeight = FontWeight.SemiBold,
+            textAlign = TextAlign.Center
         )
     }
 }
@@ -557,36 +685,24 @@ fun ErrorState(message: String, onRetryClick: () -> Unit) {
         modifier = Modifier.padding(24.dp)
     ) {
         Text(
-            text = "⚠️",
+            text = "Did you take screenshot?",
             fontSize = 48.sp
         )
         Spacer(modifier = Modifier.height(12.dp))
         Text(
             text = message,
             style = MaterialTheme.typography.bodyMedium,
-            color = Color.Gray,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center
         )
         Spacer(modifier = Modifier.height(16.dp))
         Button(
             onClick = onRetryClick,
             colors = ButtonDefaults.buttonColors(
-                containerColor = Color(0xFFD946A6)
+                containerColor = MaterialTheme.colorScheme.primary
             )
         ) {
             Text("Retry")
         }
     }
-}
-
-@Composable
-fun L0V3KeyboardTheme(content: @Composable () -> Unit) {
-    MaterialTheme(
-        colorScheme = lightColorScheme(
-            primary = Color(0xFFD946A6),
-            secondary = Color(0xFFFF69B4),
-            background = Color(0xFFFFF0F5)
-        ),
-        content = content
-    )
 }

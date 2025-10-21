@@ -10,8 +10,12 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.core.content.ContextCompat
+import com.google.android.material.color.DynamicColors
+import com.tomlin7.l0v3.data.UserPreferences
 import com.tomlin7.l0v3.ui.navigation.L0V3Navigation
 import com.tomlin7.l0v3.ui.theme.L0V3Theme
 
@@ -26,11 +30,19 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         
+        // Apply dynamic colors if available (Android 12+)
+        DynamicColors.applyToActivityIfAvailable(this)
+        
         // Request storage permission for screenshot detection
         requestStoragePermissionIfNeeded()
         
         setContent {
-            L0V3Theme {
+            val app = application as L0V3Application
+            val userPreferences by app.preferencesRepository.userPreferencesFlow.collectAsState(
+                initial = UserPreferences()
+            )
+            
+            L0V3Theme(themeMode = userPreferences.themeMode) {
                 Surface(
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background

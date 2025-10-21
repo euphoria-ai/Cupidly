@@ -3,6 +3,7 @@ package com.tomlin7.l0v3.ui.screens.home
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -44,6 +45,7 @@ fun HomeScreen(
     var showFlirtDropdown by remember { mutableStateOf(false) }
     var showLengthDropdown by remember { mutableStateOf(false) }
     var showEmojiDropdown by remember { mutableStateOf(false) }
+    var showThemeDropdown by remember { mutableStateOf(false) }
     var showGenderDropdown by remember { mutableStateOf(false) }
     var showPronounsDropdown by remember { mutableStateOf(false) }
     var showBioDialog by remember { mutableStateOf(false) }
@@ -55,24 +57,25 @@ fun HomeScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(
-                brush = Brush.verticalGradient(
-                    colors = listOf(
-                        Color(0xFFFFF0F5),
-                        Color(0xFFFFE4E1),
-                        Color(0xFFFFF5EE)
-                    )
-                )
-            )
+        .background(MaterialTheme.colorScheme.background)
             .verticalScroll(rememberScrollState())
             .padding(24.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Spacer(modifier = Modifier.height(32.dp))
         
-        // App Icon - using your custom PNG
+        // App Icon - using theme-appropriate PNG
+        val isDarkTheme = when (currentPreferences.themeMode) {
+            ThemeMode.LIGHT -> false
+            ThemeMode.DARK -> true
+            ThemeMode.SYSTEM -> isSystemInDarkTheme()
+        }
+        
         Image(
-            painter = painterResource(id = R.drawable.heart),
+            painter = painterResource(
+                id = if (isDarkTheme) R.drawable.heart_transparent 
+                     else R.drawable.heart_transparent_light
+            ),
             contentDescription = "L0V3",
             modifier = Modifier.size(100.dp),
         )
@@ -100,7 +103,7 @@ fun HomeScreen(
                 .fillMaxWidth()
                 .clickable { onNavigateToGuide() },
             colors = CardDefaults.cardColors(
-                containerColor = Color(0xFFD946A6)
+                containerColor = MaterialTheme.colorScheme.primary
             ),
             shape = RoundedCornerShape(20.dp)
         ) {
@@ -112,15 +115,15 @@ fun HomeScreen(
                     text = "Getting Started",
                     style = MaterialTheme.typography.titleLarge,
                     fontWeight = FontWeight.Bold,
-                    color = Color.White
+                    color = MaterialTheme.colorScheme.onPrimary
                 )
-                
+
                 Spacer(modifier = Modifier.height(8.dp))
-                
+
                 Text(
                     text = "Learn how to use L0V3",
                     style = MaterialTheme.typography.bodyMedium,
-                    color = Color.White.copy(alpha = 0.9f)
+                    color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.9f)
                 )
             }
         }
@@ -137,7 +140,7 @@ fun HomeScreen(
                 text = "Message Settings",
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.SemiBold,
-                color = Color(0xFF333333),
+                color = MaterialTheme.colorScheme.onBackground,
                 modifier = Modifier.padding(horizontal = 4.dp, vertical = 8.dp)
             )
             
@@ -183,12 +186,31 @@ fun HomeScreen(
             
             Spacer(modifier = Modifier.height(16.dp))
             
+            // Appearance Section
+            Text(
+                text = "Appearance",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onBackground,
+                modifier = Modifier.padding(horizontal = 4.dp, vertical = 8.dp)
+            )
+            
+            // Theme Setting Card
+            SettingCard(
+                icon = Icons.Default.Brightness6,
+                title = "Theme",
+                subtitle = currentPreferences.themeMode.displayName,
+                onClick = { showThemeDropdown = true }
+            )
+            
+            Spacer(modifier = Modifier.height(16.dp))
+            
             // Profile Info Section
             Text(
                 text = "Profile Info",
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.SemiBold,
-                color = Color(0xFF333333),
+                color = MaterialTheme.colorScheme.onBackground,
                 modifier = Modifier.padding(horizontal = 4.dp, vertical = 8.dp)
             )
             
@@ -311,6 +333,24 @@ fun HomeScreen(
         )
     }
     
+    if (showThemeDropdown) {
+        SelectionDialog(
+            title = "Select Theme",
+            options = ThemeMode.values().map { it.displayName },
+            currentValue = currentPreferences.themeMode.displayName,
+            onDismiss = { showThemeDropdown = false },
+            onSelect = { selectedText ->
+                val newTheme = ThemeMode.values().find { it.displayName == selectedText } ?: currentPreferences.themeMode
+                val updated = currentPreferences.copy(themeMode = newTheme)
+                currentPreferences = updated
+                coroutineScope.launch {
+                    preferencesRepository.updateUserPreferences(updated)
+                }
+                showThemeDropdown = false
+            }
+        )
+    }
+    
     if (showGenderDropdown) {
         SelectionDialog(
             title = "Select Gender",
@@ -373,7 +413,7 @@ fun SettingCard(
             .fillMaxWidth()
             .clickable { onClick() },
         colors = CardDefaults.cardColors(
-            containerColor = Color(0xFFF5F5F5)
+            containerColor = MaterialTheme.colorScheme.surfaceVariant
         ),
         shape = RoundedCornerShape(16.dp),
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
@@ -388,7 +428,7 @@ fun SettingCard(
             Icon(
                 imageVector = icon,
                 contentDescription = null,
-                tint = Color(0xFF333333),
+                tint = MaterialTheme.colorScheme.onSurface,
                 modifier = Modifier.size(24.dp)
             )
             
@@ -402,12 +442,12 @@ fun SettingCard(
                     text = title,
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.SemiBold,
-                    color = Color(0xFF333333)
+                    color = MaterialTheme.colorScheme.onSurface
                 )
                 Text(
                     text = subtitle,
                     style = MaterialTheme.typography.bodyMedium,
-                    color = Color(0xFF666666)
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
             
@@ -415,7 +455,7 @@ fun SettingCard(
             Icon(
                 imageVector = Icons.Default.ChevronRight,
                 contentDescription = "Navigate",
-                tint = Color(0xFF999999),
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.size(20.dp)
             )
         }
@@ -529,7 +569,7 @@ fun SelectionDialog(
                 text = title,
                 style = MaterialTheme.typography.titleLarge,
                 fontWeight = FontWeight.Bold,
-                color = Color(0xFFD946A6)
+                color = MaterialTheme.colorScheme.primary
             )
         },
         text = {
@@ -544,7 +584,7 @@ fun SelectionDialog(
                             .clickable { onSelect(option) },
                         colors = CardDefaults.cardColors(
                             containerColor = if (option == currentValue) 
-                                Color(0xFFD946A6).copy(alpha = 0.1f) 
+                                MaterialTheme.colorScheme.primary.copy(alpha = 0.1f) 
                             else Color.Transparent
                         ),
                         shape = RoundedCornerShape(8.dp)
@@ -553,8 +593,8 @@ fun SelectionDialog(
                             text = option,
                             modifier = Modifier.padding(16.dp),
                             color = if (option == currentValue) 
-                                Color(0xFFD946A6) 
-                            else Color(0xFF333333),
+                                MaterialTheme.colorScheme.primary 
+                            else MaterialTheme.colorScheme.onSurface,
                             fontWeight = if (option == currentValue) 
                                 FontWeight.Bold 
                             else FontWeight.Normal
@@ -565,7 +605,7 @@ fun SelectionDialog(
         },
         confirmButton = {
             TextButton(onClick = onDismiss) {
-                Text("Cancel", color = Color(0xFFD946A6))
+                Text("Cancel", color = MaterialTheme.colorScheme.primary)
             }
         }
     )
@@ -586,7 +626,7 @@ fun BioEditDialog(
                 text = "Edit Bio",
                 style = MaterialTheme.typography.titleLarge,
                 fontWeight = FontWeight.Bold,
-                color = Color(0xFFD946A6)
+                color = MaterialTheme.colorScheme.primary
             )
         },
         text = {
@@ -598,19 +638,19 @@ fun BioEditDialog(
                 minLines = 3,
                 maxLines = 5,
                 colors = OutlinedTextFieldDefaults.colors(
-                    focusedBorderColor = Color(0xFFD946A6),
-                    focusedLabelColor = Color(0xFFD946A6)
+                    focusedBorderColor = MaterialTheme.colorScheme.primary,
+                    focusedLabelColor = MaterialTheme.colorScheme.primary
                 )
             )
         },
         confirmButton = {
             TextButton(onClick = { onSave(bioText) }) {
-                Text("Save", color = Color(0xFFD946A6))
+                Text("Save", color = MaterialTheme.colorScheme.primary)
             }
         },
         dismissButton = {
             TextButton(onClick = onDismiss) {
-                Text("Cancel", color = Color(0xFFD946A6))
+                Text("Cancel", color = MaterialTheme.colorScheme.primary)
             }
         }
     )

@@ -20,6 +20,7 @@ class PreferencesRepository(private val context: Context) {
         val FLIRT_LEVEL = stringPreferencesKey("flirt_level")
         val REPLY_LENGTH = stringPreferencesKey("reply_length")
         val EMOJI_USE = stringPreferencesKey("emoji_use")
+        val THEME_MODE = stringPreferencesKey("theme_mode")
         val PROFILE_NAME = stringPreferencesKey("profile_name")
         val PROFILE_GENDER = stringPreferencesKey("profile_gender")
         val PROFILE_SEXUALITY = stringPreferencesKey("profile_sexuality")
@@ -46,6 +47,9 @@ class PreferencesRepository(private val context: Context) {
             emojiUse = preferences[PreferencesKeys.EMOJI_USE]?.let { 
                 EmojiUse.valueOf(it) 
             } ?: EmojiUse.EXPRESSIVE,
+            themeMode = preferences[PreferencesKeys.THEME_MODE]?.let { 
+                ThemeMode.valueOf(it) 
+            } ?: ThemeMode.SYSTEM,
             profileName = preferences[PreferencesKeys.PROFILE_NAME] ?: "",
             profileGender = preferences[PreferencesKeys.PROFILE_GENDER] ?: "",
             profileSexuality = preferences[PreferencesKeys.PROFILE_SEXUALITY] ?: "",
@@ -86,6 +90,12 @@ class PreferencesRepository(private val context: Context) {
         }
     }
     
+    suspend fun updateThemeMode(themeMode: ThemeMode) {
+        context.dataStore.edit { preferences ->
+            preferences[PreferencesKeys.THEME_MODE] = themeMode.name
+        }
+    }
+    
     suspend fun updateProfile(
         name: String,
         gender: String,
@@ -121,6 +131,7 @@ class PreferencesRepository(private val context: Context) {
             preferences[PreferencesKeys.FLIRT_LEVEL] = userPreferences.flirtLevel.name
             preferences[PreferencesKeys.REPLY_LENGTH] = userPreferences.replyLength.name
             preferences[PreferencesKeys.EMOJI_USE] = userPreferences.emojiUse.name
+            preferences[PreferencesKeys.THEME_MODE] = userPreferences.themeMode.name
             preferences[PreferencesKeys.PROFILE_NAME] = userPreferences.profileName
             preferences[PreferencesKeys.PROFILE_GENDER] = userPreferences.profileGender
             preferences[PreferencesKeys.PROFILE_SEXUALITY] = userPreferences.profileSexuality

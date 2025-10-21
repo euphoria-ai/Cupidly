@@ -2,6 +2,7 @@ package com.tomlin7.l0v3.ui.screens.guide
 
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -29,22 +30,14 @@ fun GuideScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(
-                brush = Brush.verticalGradient(
-                    colors = listOf(
-                        Color(0xFFFFF0F5),
-                        Color(0xFFFFE4E1),
-                        Color(0xFFFFF5EE)
-                    )
-                )
-            )
+        .background(MaterialTheme.colorScheme.background)
     ) {
         // Top App Bar
         TopAppBar(
             title = { 
                 Text(
                     text = "Getting Started",
-                    color = Color(0xFFD946A6),
+                    color = MaterialTheme.colorScheme.primary,
                     fontWeight = FontWeight.Bold
                 ) 
             },
@@ -53,7 +46,7 @@ fun GuideScreen(
                     Icon(
                         imageVector = Icons.AutoMirrored.Default.ArrowBack,
                         contentDescription = "Back",
-                        tint = Color(0xFFD946A6)
+                        tint = MaterialTheme.colorScheme.primary
                     )
                 }
             },
@@ -69,8 +62,13 @@ fun GuideScreen(
                 .padding(24.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
+            // Use theme-appropriate heart icon
+            val isDarkTheme = isSystemInDarkTheme()
             Image(
-                painter = painterResource(id = R.drawable.heart),
+                painter = painterResource(
+                    id = if (isDarkTheme) R.drawable.heart_transparent 
+                         else R.drawable.heart_transparent_light
+                ),
                 contentDescription = "L0V3",
                 modifier = Modifier.size(80.dp),
             )

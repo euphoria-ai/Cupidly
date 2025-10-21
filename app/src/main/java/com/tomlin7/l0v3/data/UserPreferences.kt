@@ -6,6 +6,7 @@ data class UserPreferences(
     val flirtLevel: FlirtLevel = FlirtLevel.MEDIUM,
     val replyLength: ReplyLength = ReplyLength.NORMAL,
     val emojiUse: EmojiUse = EmojiUse.EXPRESSIVE,
+    val themeMode: ThemeMode = ThemeMode.SYSTEM,
     val profileName: String = "",
     val profileGender: String = "",
     val profileSexuality: String = "",
@@ -43,4 +44,10 @@ enum class EmojiUse(val displayName: String) {
     NEVER("Never"),
     MINIMAL("Minimal"),
     EXPRESSIVE("Expressive")
+}
+
+enum class ThemeMode(val displayName: String) {
+    LIGHT("Light"),
+    DARK("Dark"),
+    SYSTEM("System")
 }
