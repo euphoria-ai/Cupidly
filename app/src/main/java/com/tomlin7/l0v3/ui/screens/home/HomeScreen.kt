@@ -1,34 +1,34 @@
 package com.tomlin7.l0v3.ui.screens.home
 
+import androidx.compose.animation.core.*
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.CoroutineScope
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.res.painterResource
 import com.tomlin7.l0v3.R
 import com.tomlin7.l0v3.data.*
+import kotlinx.coroutines.launch
 
 @Composable
 fun HomeScreen(
@@ -49,6 +49,7 @@ fun HomeScreen(
     var showGenderDropdown by remember { mutableStateOf(false) }
     var showPronounsDropdown by remember { mutableStateOf(false) }
     var showBioDialog by remember { mutableStateOf(false) }
+    var showResetDialog by remember { mutableStateOf(false) }
     
     LaunchedEffect(userPreferences) {
         currentPreferences = userPreferences
@@ -57,7 +58,7 @@ fun HomeScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
-        .background(MaterialTheme.colorScheme.background)
+            .background(MaterialTheme.colorScheme.background)
             .verticalScroll(rememberScrollState())
             .padding(24.dp),
         horizontalAlignment = Alignment.CenterHorizontally
@@ -77,167 +78,135 @@ fun HomeScreen(
                      else R.drawable.heart_transparent_light
             ),
             contentDescription = "L0V3",
-            modifier = Modifier.size(100.dp),
+            modifier = Modifier.size(120.dp),
         )
         
-        Spacer(modifier = Modifier.height(16.dp))
+        Spacer(modifier = Modifier.height(24.dp))
         
         Text(
             text = "L0V3",
             style = MaterialTheme.typography.displayMedium,
             fontWeight = FontWeight.Bold,
-            color = Color(0xFFD946A6)
+            color = MaterialTheme.colorScheme.primary
         )
         
         Text(
             text = "Type Less. Feel More.",
             style = MaterialTheme.typography.bodyLarge,
-            color = Color.Gray
+            color = MaterialTheme.colorScheme.onSurfaceVariant
         )
         
         Spacer(modifier = Modifier.height(40.dp))
         
         // Getting Started Button
-        Card(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clickable { onNavigateToGuide() },
-            colors = CardDefaults.cardColors(
-                containerColor = MaterialTheme.colorScheme.primary
-            ),
-            shape = RoundedCornerShape(20.dp)
-        ) {
-            Column(
-                modifier = Modifier.padding(20.dp),
-                horizontalAlignment = Alignment.CenterHorizontally
-            ) {
-                Text(
-                    text = "Getting Started",
-                    style = MaterialTheme.typography.titleLarge,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.onPrimary
-                )
-
-                Spacer(modifier = Modifier.height(8.dp))
-
-                Text(
-                    text = "Learn how to use L0V3",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.9f)
-                )
-            }
-        }
+        PebbleButton(
+            text = "How to Use",
+            onClick = onNavigateToGuide
+        )
+        
+        Spacer(modifier = Modifier.height(24.dp))
+        
+        // Settings Section
+        Text(
+            text = "Settings",
+            style = MaterialTheme.typography.titleLarge,
+            fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme.onBackground,
+            modifier = Modifier.align(Alignment.Start)
+        )
+        
+        Spacer(modifier = Modifier.height(16.dp))
+        
+        // Style Settings
+        SettingPebble(
+            title = "Style",
+            subtitle = currentPreferences.style.displayName,
+            onClick = { showStyleDropdown = true }
+        )
+        
+        Spacer(modifier = Modifier.height(12.dp))
+        
+        SettingPebble(
+            title = "Tone",
+            subtitle = currentPreferences.tone.displayName,
+            onClick = { showToneDropdown = true }
+        )
+        
+        Spacer(modifier = Modifier.height(12.dp))
+        
+        SettingPebble(
+            title = "Flirt Level",
+            subtitle = currentPreferences.flirtLevel.displayName,
+            onClick = { showFlirtDropdown = true }
+        )
+        
+        Spacer(modifier = Modifier.height(12.dp))
+        
+        SettingPebble(
+            title = "Reply Length",
+            subtitle = currentPreferences.replyLength.displayName,
+            onClick = { showLengthDropdown = true }
+        )
+        
+        Spacer(modifier = Modifier.height(12.dp))
+        
+        SettingPebble(
+            title = "Emoji Use",
+            subtitle = currentPreferences.emojiUse.displayName,
+            onClick = { showEmojiDropdown = true }
+        )
+        
+        Spacer(modifier = Modifier.height(12.dp))
+        
+        SettingPebble(
+            title = "Theme",
+            subtitle = currentPreferences.themeMode.displayName,
+            onClick = { showThemeDropdown = true }
+        )
         
         Spacer(modifier = Modifier.height(32.dp))
         
-        // Clean Settings List
-        Column(
-            modifier = Modifier.fillMaxWidth(),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            // Message Settings Section
-            Text(
-                text = "Message Settings",
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.SemiBold,
-                color = MaterialTheme.colorScheme.onBackground,
-                modifier = Modifier.padding(horizontal = 4.dp, vertical = 8.dp)
-            )
-            
-            // Style Setting Card
-            SettingCard(
-                icon = Icons.Default.TextFields,
-                title = "Style",
-                subtitle = currentPreferences.style.displayName,
-                onClick = { showStyleDropdown = true }
-            )
-            
-            // Tone Setting Card
-            SettingCard(
-                icon = Icons.Default.Chat,
-                title = "Tone",
-                subtitle = currentPreferences.tone.displayName,
-                onClick = { showToneDropdown = true }
-            )
-            
-            // Flirt Level Setting Card
-            SettingCard(
-                icon = Icons.Default.LocalFireDepartment,
-                title = "Flirt Level",
-                subtitle = currentPreferences.flirtLevel.displayName,
-                onClick = { showFlirtDropdown = true }
-            )
-            
-            // Reply Length Setting Card
-            SettingCard(
-                icon = Icons.Default.FormatSize,
-                title = "Reply Length",
-                subtitle = currentPreferences.replyLength.displayName,
-                onClick = { showLengthDropdown = true }
-            )
-            
-            // Emoji Use Setting Card
-            SettingCard(
-                icon = Icons.Default.EmojiEmotions,
-                title = "Emoji Use",
-                subtitle = currentPreferences.emojiUse.displayName,
-                onClick = { showEmojiDropdown = true }
-            )
-            
-            Spacer(modifier = Modifier.height(16.dp))
-            
-            // Appearance Section
-            Text(
-                text = "Appearance",
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.SemiBold,
-                color = MaterialTheme.colorScheme.onBackground,
-                modifier = Modifier.padding(horizontal = 4.dp, vertical = 8.dp)
-            )
-            
-            // Theme Setting Card
-            SettingCard(
-                icon = Icons.Default.Brightness6,
-                title = "Theme",
-                subtitle = currentPreferences.themeMode.displayName,
-                onClick = { showThemeDropdown = true }
-            )
-            
-            Spacer(modifier = Modifier.height(16.dp))
-            
-            // Profile Info Section
-            Text(
-                text = "Profile Info",
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.SemiBold,
-                color = MaterialTheme.colorScheme.onBackground,
-                modifier = Modifier.padding(horizontal = 4.dp, vertical = 8.dp)
-            )
-            
-            // Gender Setting Card
-            SettingCard(
-                icon = Icons.Default.Person,
-                title = "Gender",
-                subtitle = currentPreferences.profileGender.ifEmpty { "Select gender" },
-                onClick = { showGenderDropdown = true }
-            )
-            
-            // Pronouns Setting Card
-            SettingCard(
-                icon = Icons.Default.People,
-                title = "Pronouns",
-                subtitle = currentPreferences.profilePronouns.ifEmpty { "Select pronouns" },
-                onClick = { showPronounsDropdown = true }
-            )
-            
-            // Bio Setting Card
-            SettingCard(
-                icon = Icons.Default.Description,
-                title = "Bio",
-                subtitle = currentPreferences.profileBio.ifEmpty { "Tell us about yourself" },
-                onClick = { showBioDialog = true }
-            )
-        }
+        // Profile Section
+        Text(
+            text = "Profile",
+            style = MaterialTheme.typography.titleLarge,
+            fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme.onBackground,
+            modifier = Modifier.align(Alignment.Start)
+        )
+        
+        Spacer(modifier = Modifier.height(16.dp))
+        
+        SettingPebble(
+            title = "Gender",
+            subtitle = currentPreferences.profileGender.ifEmpty { "Not set" },
+            onClick = { showGenderDropdown = true }
+        )
+        
+        Spacer(modifier = Modifier.height(12.dp))
+        
+        SettingPebble(
+            title = "Pronouns",
+            subtitle = currentPreferences.profilePronouns.ifEmpty { "Not set" },
+            onClick = { showPronounsDropdown = true }
+        )
+        
+        Spacer(modifier = Modifier.height(12.dp))
+        
+        SettingPebble(
+            title = "Bio",
+            subtitle = currentPreferences.profileBio.ifEmpty { "Tell us about yourself" },
+            onClick = { showBioDialog = true }
+        )
+        
+        Spacer(modifier = Modifier.height(32.dp))
+        
+        // Reset Button
+        PebbleButton(
+            text = "Reset All Settings",
+            onClick = { showResetDialog = true },
+            isDestructive = true
+        )
         
         Spacer(modifier = Modifier.height(32.dp))
     }
@@ -355,7 +324,7 @@ fun HomeScreen(
         SelectionDialog(
             title = "Select Gender",
             options = listOf("Male", "Female", "Non-binary", "Other", "Prefer not to say"),
-            currentValue = currentPreferences.profileGender.ifEmpty { "Select gender" },
+            currentValue = currentPreferences.profileGender.ifEmpty { "Not set" },
             onDismiss = { showGenderDropdown = false },
             onSelect = { selectedText ->
                 val updated = currentPreferences.copy(profileGender = selectedText)
@@ -371,8 +340,8 @@ fun HomeScreen(
     if (showPronounsDropdown) {
         SelectionDialog(
             title = "Select Pronouns",
-            options = listOf("He/Him", "She/Her", "They/Them", "Other", "Prefer not to say"),
-            currentValue = currentPreferences.profilePronouns.ifEmpty { "Select pronouns" },
+            options = listOf("he/him", "she/her", "they/them", "ze/zir", "Other"),
+            currentValue = currentPreferences.profilePronouns.ifEmpty { "Not set" },
             onDismiss = { showPronounsDropdown = false },
             onSelect = { selectedText ->
                 val updated = currentPreferences.copy(profilePronouns = selectedText)
@@ -399,24 +368,210 @@ fun HomeScreen(
             }
         )
     }
+    
+    // Reset Confirmation Dialog
+    if (showResetDialog) {
+        AlertDialog(
+            onDismissRequest = { showResetDialog = false },
+            title = {
+                Text(
+                    text = "Reset Settings",
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+            },
+            text = {
+                Text(
+                    text = "This will reset all your preferences to default values. This action cannot be undone.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        coroutineScope.launch {
+                            preferencesRepository.resetAllSettings()
+                            currentPreferences = UserPreferences()
+                        }
+                        showResetDialog = false
+                    }
+                ) {
+                    Text(
+                        "Reset",
+                        color = MaterialTheme.colorScheme.error
+                    )
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showResetDialog = false }) {
+                    Text(
+                        "Cancel",
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
+            }
+        )
+    }
 }
 
 @Composable
-fun SettingCard(
-    icon: ImageVector,
+fun PebbleButton(
+    text: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    isDestructive: Boolean = false
+) {
+    val interactionSource = remember { MutableInteractionSource() }
+    val isPressed by interactionSource.collectIsPressedAsState()
+    
+    // Animation for press effect
+    val scale by animateFloatAsState(
+        targetValue = if (isPressed) 0.95f else 1f,
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioMediumBouncy,
+            stiffness = Spring.StiffnessLow
+        ),
+        label = "scale"
+    )
+    
+    val glowAlpha by animateFloatAsState(
+        targetValue = if (isPressed) 0.4f else 0.2f,
+        animationSpec = tween(150),
+        label = "glow"
+    )
+    
+    val isDarkTheme = MaterialTheme.colorScheme.background == Color(0xFF121212)
+    val buttonColor = if (isDestructive) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
+    
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .graphicsLayer {
+                scaleX = scale
+                scaleY = scale
+            }
+            .shadow(
+                elevation = if (isPressed) 8.dp else 4.dp,
+                shape = RoundedCornerShape(20.dp),
+                ambientColor = buttonColor.copy(alpha = glowAlpha * 0.3f),
+                spotColor = buttonColor.copy(alpha = glowAlpha * 0.5f),
+                clip = false
+            )
+            .background(
+                brush = Brush.verticalGradient(
+                    colors = if (isDarkTheme) {
+                        listOf(
+                            buttonColor.copy(alpha = 0.5f),
+                            buttonColor.copy(alpha = 0.4f),
+                            buttonColor.copy(alpha = 0.3f)
+                        )
+                    } else {
+                        listOf(
+                            buttonColor.copy(alpha = 0.7f),
+                            buttonColor.copy(alpha = 0.6f),
+                            buttonColor.copy(alpha = 0.5f)
+                        )
+                    }
+                ),
+                shape = RoundedCornerShape(20.dp)
+            )
+            .background(
+                brush = Brush.radialGradient(
+                    colors = listOf(
+                        buttonColor.copy(alpha = 0.15f),
+                        Color.Transparent
+                    ),
+                    radius = 300f
+                ),
+                shape = RoundedCornerShape(20.dp)
+            )
+            .clickable(
+                interactionSource = interactionSource,
+                indication = null,
+                onClick = onClick
+            )
+    ) {
+        Text(
+            text = text,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 32.dp, vertical = 16.dp),
+            style = MaterialTheme.typography.titleMedium,
+            color = Color.White,
+            fontWeight = FontWeight.SemiBold,
+            textAlign = TextAlign.Center
+        )
+    }
+}
+
+@Composable
+fun SettingPebble(
     title: String,
     subtitle: String,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
 ) {
-    Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable { onClick() },
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceVariant
+    val interactionSource = remember { MutableInteractionSource() }
+    val isPressed by interactionSource.collectIsPressedAsState()
+    
+    // Animation for press effect
+    val scale by animateFloatAsState(
+        targetValue = if (isPressed) 0.98f else 1f,
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioMediumBouncy,
+            stiffness = Spring.StiffnessLow
         ),
-        shape = RoundedCornerShape(16.dp),
-        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
+        label = "scale"
+    )
+    
+    val glowAlpha by animateFloatAsState(
+        targetValue = if (isPressed) 0.2f else 0.05f,
+        animationSpec = tween(150),
+        label = "glow"
+    )
+    
+    val isDarkTheme = MaterialTheme.colorScheme.background == Color(0xFF121212)
+    val surfaceColor = MaterialTheme.colorScheme.surfaceVariant
+    
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .graphicsLayer {
+                scaleX = scale
+                scaleY = scale
+            }
+            .shadow(
+                elevation = if (isPressed) 4.dp else 2.dp,
+                shape = RoundedCornerShape(16.dp),
+                ambientColor = surfaceColor.copy(alpha = glowAlpha * 0.3f),
+                spotColor = surfaceColor.copy(alpha = glowAlpha * 0.5f),
+                clip = false
+            )
+            .background(
+                brush = Brush.verticalGradient(
+                    colors = if (isDarkTheme) {
+                        listOf(
+                            surfaceColor.copy(alpha = 0.3f),
+                            surfaceColor.copy(alpha = 0.2f),
+                            surfaceColor.copy(alpha = 0.1f)
+                        )
+                    } else {
+                        listOf(
+                            surfaceColor.copy(alpha = 0.5f),
+                            surfaceColor.copy(alpha = 0.4f),
+                            surfaceColor.copy(alpha = 0.3f)
+                        )
+                    }
+                ),
+                shape = RoundedCornerShape(16.dp)
+            )
+            .clickable(
+                interactionSource = interactionSource,
+                indication = null,
+                onClick = onClick
+            )
     ) {
         Row(
             modifier = Modifier
@@ -424,20 +579,7 @@ fun SettingCard(
                 .padding(20.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // Icon
-            Icon(
-                imageVector = icon,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.onSurface,
-                modifier = Modifier.size(24.dp)
-            )
-            
-            Spacer(modifier = Modifier.width(16.dp))
-            
-            // Title and Subtitle
-            Column(
-                modifier = Modifier.weight(1f)
-            ) {
+            Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = title,
                     style = MaterialTheme.typography.titleMedium,
@@ -451,105 +593,12 @@ fun SettingCard(
                 )
             }
             
-            // Chevron
             Icon(
                 imageVector = Icons.Default.ChevronRight,
                 contentDescription = "Navigate",
                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.size(20.dp)
             )
-        }
-    }
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-fun GenderDropdownMenu(
-    currentValue: String,
-    onValueChange: (String) -> Unit
-) {
-    val genders = listOf("Male", "Female", "Non-binary", "Other", "Prefer not to say")
-    var expanded by remember { mutableStateOf(false) }
-    
-    ExposedDropdownMenuBox(
-        expanded = expanded,
-        onExpandedChange = { expanded = !expanded }
-    ) {
-        OutlinedTextField(
-            value = currentValue.ifEmpty { "Select gender" },
-            onValueChange = {},
-            readOnly = true,
-            label = { Text("Gender") },
-            trailingIcon = { 
-                ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) 
-            },
-            modifier = Modifier
-                .fillMaxWidth()
-                .menuAnchor(),
-            colors = OutlinedTextFieldDefaults.colors(
-                focusedBorderColor = Color(0xFFD946A6),
-                focusedLabelColor = Color(0xFFD946A6)
-            )
-        )
-        ExposedDropdownMenu(
-            expanded = expanded,
-            onDismissRequest = { expanded = false }
-        ) {
-            genders.forEach { gender ->
-                DropdownMenuItem(
-                    text = { Text(gender) },
-                    onClick = {
-                        onValueChange(gender)
-                        expanded = false
-                    }
-                )
-            }
-        }
-    }
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-fun PronounsDropdownMenu(
-    currentValue: String,
-    onValueChange: (String) -> Unit
-) {
-    val pronouns = listOf("He/Him", "She/Her", "They/Them", "Other", "Prefer not to say")
-    var expanded by remember { mutableStateOf(false) }
-    
-    ExposedDropdownMenuBox(
-        expanded = expanded,
-        onExpandedChange = { expanded = !expanded }
-    ) {
-        OutlinedTextField(
-            value = currentValue.ifEmpty { "Select pronouns" },
-            onValueChange = {},
-            readOnly = true,
-            label = { Text("Pronouns") },
-            trailingIcon = { 
-                ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) 
-            },
-            modifier = Modifier
-                .fillMaxWidth()
-                .menuAnchor(),
-            colors = OutlinedTextFieldDefaults.colors(
-                focusedBorderColor = Color(0xFFD946A6),
-                focusedLabelColor = Color(0xFFD946A6)
-            )
-        )
-        ExposedDropdownMenu(
-            expanded = expanded,
-            onDismissRequest = { expanded = false }
-        ) {
-            pronouns.forEach { pronoun ->
-                DropdownMenuItem(
-                    text = { Text(pronoun) },
-                    onClick = {
-                        onValueChange(pronoun)
-                        expanded = false
-                    }
-                )
-            }
         }
     }
 }
@@ -569,35 +618,32 @@ fun SelectionDialog(
                 text = title,
                 style = MaterialTheme.typography.titleLarge,
                 fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.primary
+                color = MaterialTheme.colorScheme.onSurface
             )
         },
         text = {
-            LazyColumn(
-                modifier = Modifier.heightIn(max = 400.dp)
-            ) {
-                items(options) { option ->
-                    Card(
+            Column {
+                options.forEach { option ->
+                    Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(vertical = 4.dp)
-                            .clickable { onSelect(option) },
-                        colors = CardDefaults.cardColors(
-                            containerColor = if (option == currentValue) 
-                                MaterialTheme.colorScheme.primary.copy(alpha = 0.1f) 
-                            else Color.Transparent
-                        ),
-                        shape = RoundedCornerShape(8.dp)
+                            .clickable { onSelect(option) }
+                            .padding(vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
                             text = option,
-                            modifier = Modifier.padding(16.dp),
-                            color = if (option == currentValue) 
-                                MaterialTheme.colorScheme.primary 
-                            else MaterialTheme.colorScheme.onSurface,
-                            fontWeight = if (option == currentValue) 
-                                FontWeight.Bold 
-                            else FontWeight.Normal
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = if (option == currentValue) {
+                                MaterialTheme.colorScheme.primary
+                            } else {
+                                MaterialTheme.colorScheme.onSurface
+                            },
+                            fontWeight = if (option == currentValue) {
+                                FontWeight.SemiBold
+                            } else {
+                                FontWeight.Normal
+                            }
                         )
                     }
                 }

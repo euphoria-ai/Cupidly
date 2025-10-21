@@ -141,4 +141,10 @@ class PreferencesRepository(private val context: Context) {
             preferences[PreferencesKeys.HAS_COMPLETED_ONBOARDING] = userPreferences.hasCompletedOnboarding
         }
     }
+    
+    suspend fun resetAllSettings() {
+        context.dataStore.edit { preferences ->
+            preferences.clear()
+        }
+    }
 }

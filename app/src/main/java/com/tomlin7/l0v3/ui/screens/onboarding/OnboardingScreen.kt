@@ -3,26 +3,38 @@ package com.tomlin7.l0v3.ui.screens.onboarding
 import android.content.Context
 import android.content.Intent
 import android.provider.Settings
+import androidx.compose.animation.core.*
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import com.tomlin7.l0v3.R
 import com.tomlin7.l0v3.data.PreferencesRepository
+import com.tomlin7.l0v3.data.ThemeMode
+import com.tomlin7.l0v3.ui.theme.L0V3Theme
 import kotlinx.coroutines.launch
 
 @Composable
@@ -30,53 +42,134 @@ fun OnboardingScreen(
     onComplete: () -> Unit,
     preferencesRepository: PreferencesRepository
 ) {
-    var currentPage by remember { mutableIntStateOf(0) }
-    var apiKey by remember { mutableStateOf("") }
+    val pagerState = rememberPagerState(pageCount = { 3 })
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
+    var apiKey by remember { mutableStateOf("") }
     
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(
-                brush = Brush.verticalGradient(
-                    colors = listOf(
-                        Color(0xFFFFF0F5),
-                        Color(0xFFFFE4E1),
-                        Color(0xFFFFF5EE)
-                    )
+    // Get current theme preference
+    val userPreferences by preferencesRepository.userPreferencesFlow.collectAsState(
+        initial = com.tomlin7.l0v3.data.UserPreferences()
+    )
+    
+    L0V3Theme(themeMode = userPreferences.themeMode) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(MaterialTheme.colorScheme.background)
+        ) {
+        // Page indicator
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(24.dp),
+            horizontalArrangement = Arrangement.Center
+        ) {
+            repeat(3) { index ->
+                val isActive = pagerState.currentPage == index
+                val width by animateDpAsState(
+                    targetValue = if (isActive) 24.dp else 8.dp,
+                    animationSpec = tween(300),
+                    label = "indicator"
                 )
-            )
-    ) {
-        when (currentPage) {
-            0 -> WelcomePage(
-                onNext = { currentPage++ }
-            )
-            1 -> ApiKeyPage(
-                apiKey = apiKey,
-                onApiKeyChange = { apiKey = it },
-                onNext = {
-                    scope.launch {
-                        preferencesRepository.updateGeminiApiKey(apiKey)
-                        currentPage++
+                val alpha by animateFloatAsState(
+                    targetValue = if (isActive) 1f else 0.3f,
+                    animationSpec = tween(300),
+                    label = "alpha"
+                )
+                
+                Box(
+                    modifier = Modifier
+                        .width(width)
+                        .height(8.dp)
+                        .background(
+                            color = MaterialTheme.colorScheme.primary.copy(alpha = alpha),
+                            shape = RoundedCornerShape(4.dp)
+                        )
+                )
+                
+                if (index < 2) {
+                    Spacer(modifier = Modifier.width(8.dp))
+                }
+            }
+        }
+        
+        // Content
+        HorizontalPager(
+            state = pagerState,
+            modifier = Modifier.weight(1f)
+        ) { page ->
+            when (page) {
+                0 -> WelcomeSlide()
+                1 -> ApiKeySlide(
+                    apiKey = apiKey,
+                    onApiKeyChange = { apiKey = it }
+                )
+                2 -> EnableKeyboardSlide(context = context)
+            }
+        }
+        
+        // Navigation
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(24.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            if (pagerState.currentPage > 0) {
+                PebbleButton(
+                    text = "Back",
+                    onClick = {
+                        scope.launch {
+                            pagerState.animateScrollToPage(pagerState.currentPage - 1)
+                        }
+                    }
+                )
+            } else {
+                Spacer(modifier = Modifier.width(80.dp))
+            }
+            
+            PebbleButton(
+                text = when (pagerState.currentPage) {
+                    0 -> "Next"
+                    1 -> if (apiKey.isNotBlank()) "Continue" else "Skip"
+                    2 -> "Finish"
+                    else -> "Next"
+                },
+                onClick = {
+                    when (pagerState.currentPage) {
+                        0 -> {
+                            scope.launch {
+                                pagerState.animateScrollToPage(1)
+                            }
+                        }
+                        1 -> {
+                            scope.launch {
+                                if (apiKey.isNotBlank()) {
+                                    preferencesRepository.updateGeminiApiKey(apiKey)
+                                }
+                                pagerState.animateScrollToPage(2)
+                            }
+                        }
+                        2 -> {
+                            scope.launch {
+                                preferencesRepository.setOnboardingCompleted()
+                                onComplete()
+                            }
+                        }
                     }
                 }
             )
-            2 -> EnableKeyboardPage(
-                context = context,
-                onNext = {
-                    scope.launch {
-                        preferencesRepository.setOnboardingCompleted()
-                        onComplete()
-                    }
-                }
-            )
+        }
         }
     }
 }
 
 @Composable
-fun WelcomePage(onNext: () -> Unit) {
+fun WelcomeSlide() {
+    val isDarkTheme = isSystemInDarkTheme()
+    
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -84,122 +177,74 @@ fun WelcomePage(onNext: () -> Unit) {
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {
-        Text(
-            text = "❤️",
-            style = MaterialTheme.typography.displayLarge
-        )
-        
-        Spacer(modifier = Modifier.height(24.dp))
-        
-        Text(
-            text = "Welcome to L0V3",
-            style = MaterialTheme.typography.displayMedium,
-            fontWeight = FontWeight.Bold,
-            color = Color(0xFFD946A6),
-            textAlign = TextAlign.Center
-        )
-        
-        Spacer(modifier = Modifier.height(12.dp))
-        
-        Text(
-            text = "Type Less. Feel More.",
-            style = MaterialTheme.typography.titleLarge,
-            color = Color.Gray,
-            textAlign = TextAlign.Center
+        // Logo
+        Image(
+            painter = painterResource(
+                id = if (isDarkTheme) R.drawable.heart_transparent
+                     else R.drawable.heart_transparent_light
+            ),
+            contentDescription = "L0V3",
+            modifier = Modifier.size(120.dp)
         )
         
         Spacer(modifier = Modifier.height(32.dp))
-        
+
         Text(
-            text = "Transform any chat into smooth, confident, and emotionally intelligent conversation powered by AI suggestions.",
-            style = MaterialTheme.typography.bodyLarge,
-            textAlign = TextAlign.Center,
-            color = Color.DarkGray
+            text = "L0V3",
+            style = MaterialTheme.typography.displayMedium,
+            fontWeight = FontWeight.Bold,
+            color = MaterialTheme.colorScheme.primary
         )
-        
-        Spacer(modifier = Modifier.weight(1f))
-        
-        Button(
-            onClick = onNext,
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(56.dp),
-            colors = ButtonDefaults.buttonColors(
-                containerColor = Color(0xFFD946A6)
-            ),
-            shape = RoundedCornerShape(16.dp)
-        ) {
-            Text("Get Started", style = MaterialTheme.typography.titleMedium)
-        }
+
+        Text(
+            text = "Type Less. Feel More.",
+            style = MaterialTheme.typography.headlineMedium,
+            fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme.onBackground,
+            textAlign = TextAlign.Center
+        )
     }
 }
 
 @Composable
-fun ApiKeyPage(
+fun ApiKeySlide(
     apiKey: String,
-    onApiKeyChange: (String) -> Unit,
-    onNext: () -> Unit
+    onApiKeyChange: (String) -> Unit
 ) {
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .padding(32.dp)
-            .verticalScroll(rememberScrollState()),
-        horizontalAlignment = Alignment.CenterHorizontally
+            .padding(32.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
     ) {
         Icon(
             imageVector = Icons.Default.Key,
             contentDescription = null,
             modifier = Modifier.size(80.dp),
-            tint = Color(0xFFD946A6)
+            tint = MaterialTheme.colorScheme.primary
         )
         
-        Spacer(modifier = Modifier.height(24.dp))
+        Spacer(modifier = Modifier.height(32.dp))
         
         Text(
-            text = "Gemini API Key",
-            style = MaterialTheme.typography.titleLarge,
-            fontWeight = FontWeight.Bold,
-            color = Color(0xFFD946A6)
+            text = "Connect AI",
+            style = MaterialTheme.typography.headlineMedium,
+            fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme.onBackground,
+            textAlign = TextAlign.Center
         )
         
-        Spacer(modifier = Modifier.height(12.dp))
+        Spacer(modifier = Modifier.height(16.dp))
         
         Text(
-            text = "L0V3 uses Google's Gemini AI to generate smart replies. You'll need an API key to get started.",
-            style = MaterialTheme.typography.bodyMedium,
-            textAlign = TextAlign.Center,
-            color = Color.DarkGray
+            text = "Add your Gemini API key for smart suggestions",
+            style = MaterialTheme.typography.bodyLarge,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = TextAlign.Center
         )
         
-        Spacer(modifier = Modifier.height(24.dp))
-        
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            colors = CardDefaults.cardColors(
-                containerColor = Color.White.copy(alpha = 0.8f)
-            ),
-            shape = RoundedCornerShape(16.dp)
-        ) {
-            Column(modifier = Modifier.padding(16.dp)) {
-                Text(
-                    text = "How to get your API key:",
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.SemiBold
-                )
-                Spacer(modifier = Modifier.height(8.dp))
-                Text(
-                    text = "1. Visit aistudio.google.com\n" +
-                            "2. Sign in with your Google account\n" +
-                            "3. Click 'Get API Key'\n" +
-                            "4. Copy and paste it below",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = Color.DarkGray
-                )
-            }
-        }
-        
-        Spacer(modifier = Modifier.height(24.dp))
+        Spacer(modifier = Modifier.height(32.dp))
         
         OutlinedTextField(
             value = apiKey,
@@ -210,176 +255,142 @@ fun ApiKeyPage(
             visualTransformation = PasswordVisualTransformation(),
             singleLine = true,
             colors = OutlinedTextFieldDefaults.colors(
-                focusedBorderColor = Color(0xFFD946A6),
-                focusedLabelColor = Color(0xFFD946A6)
+                focusedBorderColor = MaterialTheme.colorScheme.primary,
+                focusedLabelColor = MaterialTheme.colorScheme.primary
             )
         )
-        
-        Spacer(modifier = Modifier.weight(1f))
-        
-        Button(
-            onClick = onNext,
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(56.dp),
-            enabled = apiKey.isNotBlank(),
-            colors = ButtonDefaults.buttonColors(
-                containerColor = Color(0xFFD946A6)
-            ),
-            shape = RoundedCornerShape(16.dp)
-        ) {
-            Text("Continue", style = MaterialTheme.typography.titleMedium)
-        }
     }
 }
 
 @Composable
-fun EnableKeyboardPage(
-    context: Context,
-    onNext: () -> Unit
-) {
+fun EnableKeyboardSlide(context: Context) {
     Column(
         modifier = Modifier
             .fillMaxSize()
             .padding(32.dp),
-        horizontalAlignment = Alignment.CenterHorizontally
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
     ) {
         Icon(
             imageVector = Icons.Default.Keyboard,
             contentDescription = null,
             modifier = Modifier.size(80.dp),
-            tint = Color(0xFFD946A6)
-        )
-        
-        Spacer(modifier = Modifier.height(24.dp))
-        
-        Text(
-            text = "Enable L0V3 Keyboard",
-            style = MaterialTheme.typography.titleLarge,
-            fontWeight = FontWeight.Bold,
-            color = Color(0xFFD946A6)
-        )
-        
-        Spacer(modifier = Modifier.height(12.dp))
-        
-        Text(
-            text = "To use L0V3, you need to enable it as an input method.",
-            style = MaterialTheme.typography.bodyMedium,
-            textAlign = TextAlign.Center,
-            color = Color.DarkGray
+            tint = MaterialTheme.colorScheme.primary
         )
         
         Spacer(modifier = Modifier.height(32.dp))
         
-        StepCard(
-            number = "1",
-            title = "Open Keyboard Settings",
-            description = "Tap the button below to open system settings",
-            icon = Icons.Default.Settings
+        Text(
+            text = "Enable Keyboard",
+            style = MaterialTheme.typography.headlineMedium,
+            fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme.onBackground,
+            textAlign = TextAlign.Center
         )
         
         Spacer(modifier = Modifier.height(16.dp))
         
-        StepCard(
-            number = "2",
-            title = "Enable L0V3 Keyboard",
-            description = "Find 'L0V3 Keyboard' in the list and enable it",
-            icon = Icons.Default.ToggleOn
+        Text(
+            text = "Activate L0V3 in your system settings",
+            style = MaterialTheme.typography.bodyLarge,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = TextAlign.Center
         )
         
-        Spacer(modifier = Modifier.height(16.dp))
+        Spacer(modifier = Modifier.height(32.dp))
         
-        StepCard(
-            number = "3",
-            title = "Select as Default",
-            description = "Choose L0V3 as your default keyboard",
-            icon = Icons.Default.Check
-        )
-        
-        Spacer(modifier = Modifier.weight(1f))
-        
-        OutlinedButton(
+        PebbleButton(
+            text = "Open Settings",
             onClick = {
                 val intent = Intent(Settings.ACTION_INPUT_METHOD_SETTINGS)
                 context.startActivity(intent)
-            },
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(56.dp),
-            colors = ButtonDefaults.outlinedButtonColors(
-                contentColor = Color(0xFFD946A6)
-            ),
-            shape = RoundedCornerShape(16.dp)
-        ) {
-            Text("Open Settings", style = MaterialTheme.typography.titleMedium)
-        }
-        
-        Spacer(modifier = Modifier.height(12.dp))
-        
-        Button(
-            onClick = onNext,
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(56.dp),
-            colors = ButtonDefaults.buttonColors(
-                containerColor = Color(0xFFD946A6)
-            ),
-            shape = RoundedCornerShape(16.dp)
-        ) {
-            Text("Finish", style = MaterialTheme.typography.titleMedium)
-        }
+            }
+        )
     }
 }
 
-
 @Composable
-fun StepCard(
-    number: String,
-    title: String,
-    description: String,
-    icon: ImageVector
+fun PebbleButton(
+    text: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
 ) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(
-            containerColor = Color.White.copy(alpha = 0.8f)
+    val interactionSource = remember { MutableInteractionSource() }
+    val isPressed by interactionSource.collectIsPressedAsState()
+    
+    // Animation for press effect
+    val scale by animateFloatAsState(
+        targetValue = if (isPressed) 0.95f else 1f,
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioMediumBouncy,
+            stiffness = Spring.StiffnessLow
         ),
-        shape = RoundedCornerShape(16.dp)
+        label = "scale"
+    )
+    
+    val glowAlpha by animateFloatAsState(
+        targetValue = if (isPressed) 0.4f else 0.2f,
+        animationSpec = tween(150),
+        label = "glow"
+    )
+    
+    val isDarkTheme = MaterialTheme.colorScheme.background == Color(0xFF121212)
+    val primaryColor = MaterialTheme.colorScheme.primary
+    
+    Box(
+        modifier = modifier
+            .graphicsLayer {
+                scaleX = scale
+                scaleY = scale
+            }
+            .shadow(
+                elevation = if (isPressed) 8.dp else 4.dp,
+                shape = RoundedCornerShape(20.dp),
+                ambientColor = primaryColor.copy(alpha = glowAlpha * 0.3f),
+                spotColor = primaryColor.copy(alpha = glowAlpha * 0.5f),
+                clip = false
+            )
+            .background(
+                brush = Brush.verticalGradient(
+                    colors = if (isDarkTheme) {
+                        listOf(
+                            primaryColor.copy(alpha = 0.5f),
+                            primaryColor.copy(alpha = 0.4f),
+                            primaryColor.copy(alpha = 0.3f)
+                        )
+                    } else {
+                        listOf(
+                            primaryColor.copy(alpha = 0.7f),
+                            primaryColor.copy(alpha = 0.6f),
+                            primaryColor.copy(alpha = 0.5f)
+                        )
+                    }
+                ),
+                shape = RoundedCornerShape(20.dp)
+            )
+            .background(
+                brush = Brush.radialGradient(
+                    colors = listOf(
+                        primaryColor.copy(alpha = 0.15f),
+                        Color.Transparent
+                    ),
+                    radius = 300f
+                ),
+                shape = RoundedCornerShape(20.dp)
+            )
+            .clickable(
+                interactionSource = interactionSource,
+                indication = null,
+                onClick = onClick
+            )
     ) {
-        Row(
-            modifier = Modifier.padding(16.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Surface(
-                shape = RoundedCornerShape(12.dp),
-                color = Color(0xFFD946A6).copy(alpha = 0.1f),
-                modifier = Modifier.size(48.dp)
-            ) {
-                Box(contentAlignment = Alignment.Center) {
-                    Icon(
-                        imageVector = icon,
-                        contentDescription = null,
-                        tint = Color(0xFFD946A6),
-                        modifier = Modifier.size(24.dp)
-                    )
-                }
-            }
-            
-            Spacer(modifier = Modifier.width(16.dp))
-            
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = title,
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.SemiBold
-                )
-                Spacer(modifier = Modifier.height(4.dp))
-                Text(
-                    text = description,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = Color.Gray
-                )
-            }
-        }
+        Text(
+            text = text,
+            modifier = Modifier.padding(horizontal = 32.dp, vertical = 16.dp),
+            style = MaterialTheme.typography.titleMedium,
+            color = Color.White,
+            fontWeight = FontWeight.SemiBold,
+            textAlign = TextAlign.Center
+        )
     }
 }

@@ -390,8 +390,8 @@ fun IdleState(
 
         Spacer(modifier = Modifier.height(8.dp))
 
-        val isDarkTheme = MaterialTheme.colorScheme.background == Color(0xFF121212)
         val softGreyColor = if (isDarkTheme) Color(0xFF2A2A2A) else Color(0xFFF5F5F5)
+        val iconColor = if (isDarkTheme) Color(0xFFE0E0E0) else Color(0xFF424242)
         
 
         // Bottom controls
@@ -413,7 +413,7 @@ fun IdleState(
                 Icon(
                     imageVector = Icons.Default.Settings,
                     contentDescription = "Settings",
-                    tint = MaterialTheme.colorScheme.onSurface,
+                    tint = iconColor,
                     modifier = Modifier.size(24.dp)
                 )
             }
@@ -431,7 +431,7 @@ fun IdleState(
                 Icon(
                     imageVector = Icons.AutoMirrored.Filled.Backspace,
                     contentDescription = "Backspace",
-                    tint = MaterialTheme.colorScheme.onSurface,
+                    tint = iconColor,
                     modifier = Modifier.size(24.dp)
                 )
             }
@@ -533,6 +533,7 @@ fun SuggestionsState(
         // Bottom row with keyboard, generate, and backspace buttons
         val isDarkTheme = MaterialTheme.colorScheme.background == Color(0xFF121212)
         val softGreyColor = if (isDarkTheme) Color(0xFF2A2A2A) else Color(0xFFF5F5F5)
+        val iconColor = if (isDarkTheme) Color(0xFFE0E0E0) else Color(0xFF424242)
         
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -552,7 +553,7 @@ fun SuggestionsState(
                 Icon(
                     imageVector = Icons.Default.Keyboard,
                     contentDescription = "Switch keyboard",
-                    tint = MaterialTheme.colorScheme.onSurface,
+                    tint = iconColor,
                     modifier = Modifier.size(24.dp)
                 )
             }
@@ -567,7 +568,7 @@ fun SuggestionsState(
             ) {
                 Text(
                     text = "Generate more rizz",
-                    color = MaterialTheme.colorScheme.onSurface,
+                    color = iconColor,                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         
                     fontWeight = FontWeight.Medium
                 )
             }
@@ -585,7 +586,7 @@ fun SuggestionsState(
                 Icon(
                     imageVector = Icons.AutoMirrored.Filled.Backspace,
                     contentDescription = "Backspace",
-                    tint = MaterialTheme.colorScheme.onSurface,
+                    tint = iconColor,
                     modifier = Modifier.size(24.dp)
                 )
             }
