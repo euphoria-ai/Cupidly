@@ -19,7 +19,11 @@ import android.os.Looper
 import android.provider.MediaStore
 import android.util.Log
 import androidx.core.app.NotificationCompat
+import com.tomlin7.l0v3.api.GeminiService
+import com.tomlin7.l0v3.data.PreferencesRepository
+import com.tomlin7.l0v3.data.UserPreferences
 import kotlinx.coroutines.*
+import kotlinx.coroutines.flow.first
 import java.io.File
 
 class ScreenshotDetectionService : Service() {
@@ -28,6 +32,7 @@ class ScreenshotDetectionService : Service() {
     private val serviceScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
     private var lastScreenshotPath: String? = null
     private var lastScreenshotTime: Long = 0
+    private lateinit var preferencesRepository: PreferencesRepository
     
     companion object {
         const val ACTION_START = "com.tomlin7.l0v3.ACTION_START_DETECTION"
@@ -37,12 +42,14 @@ class ScreenshotDetectionService : Service() {
         private const val CHANNEL_ID = "screenshot_detection"
         
         var onScreenshotDetected: ((Bitmap) -> Unit)? = null
+        var onAutoReplyGenerated: ((List<String>) -> Unit)? = null
         var isServiceRunning = false
     }
     
     override fun onCreate() {
         super.onCreate()
         createNotificationChannel()
+        preferencesRepository = PreferencesRepository(this)
     }
     
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -135,6 +142,10 @@ class ScreenshotDetectionService : Service() {
                                         withContext(Dispatchers.Main) {
                                             onScreenshotDetected?.invoke(bitmap)
                                         }
+                                        
+                                        // Automatically generate replies
+                                        generateAutoReplies(bitmap)
+                                        
                                         Log.d("ScreenshotDetection", "Screenshot detected and processed: $path")
                                     }
                                 }
@@ -211,10 +222,37 @@ class ScreenshotDetectionService : Service() {
         }
     }
     
+    private fun generateAutoReplies(bitmap: Bitmap) {
+        serviceScope.launch(Dispatchers.IO) {
+            try {
+                val prefs = preferencesRepository.userPreferencesFlow.first()
+                
+                if (prefs.geminiApiKey.isEmpty()) {
+                    Log.w("ScreenshotDetection", "No API key available for auto-reply generation")
+                    return@launch
+                }
+                
+                val geminiService = GeminiService(prefs.geminiApiKey)
+                val result = geminiService.generateReplies(bitmap, prefs)
+                
+                result.onSuccess { replies ->
+                    withContext(Dispatchers.Main) {
+                        onAutoReplyGenerated?.invoke(replies)
+                    }
+                    Log.d("ScreenshotDetection", "Auto-generated ${replies.size} replies")
+                }.onFailure { error ->
+                    Log.e("ScreenshotDetection", "Error generating auto replies", error)
+                }
+            } catch (e: Exception) {
+                Log.e("ScreenshotDetection", "Error generating auto replies", e)
+            }
+        }
+    }
+    
     private fun createNotification(): Notification {
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("L0V3 is active")
-            .setContentText("Take a screenshot, tap ❤️ to get AI replies")
+            .setContentText("Take a screenshot for automatic AI replies")
             .setSmallIcon(android.R.drawable.ic_dialog_info)
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .setOngoing(true)
