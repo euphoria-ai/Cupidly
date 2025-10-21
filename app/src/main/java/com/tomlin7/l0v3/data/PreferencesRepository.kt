@@ -1,0 +1,116 @@
+package com.tomlin7.l0v3.data
+
+import android.content.Context
+import androidx.datastore.core.DataStore
+import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.core.booleanPreferencesKey
+import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.stringPreferencesKey
+import androidx.datastore.preferences.preferencesDataStore
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.map
+
+val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "love_preferences")
+
+class PreferencesRepository(private val context: Context) {
+    
+    private object PreferencesKeys {
+        val STYLE = stringPreferencesKey("message_style")
+        val TONE = stringPreferencesKey("message_tone")
+        val FLIRT_LEVEL = stringPreferencesKey("flirt_level")
+        val REPLY_LENGTH = stringPreferencesKey("reply_length")
+        val EMOJI_USE = stringPreferencesKey("emoji_use")
+        val PROFILE_NAME = stringPreferencesKey("profile_name")
+        val PROFILE_GENDER = stringPreferencesKey("profile_gender")
+        val PROFILE_SEXUALITY = stringPreferencesKey("profile_sexuality")
+        val PROFILE_BIO = stringPreferencesKey("profile_bio")
+        val PROFILE_PRONOUNS = stringPreferencesKey("profile_pronouns")
+        val GEMINI_API_KEY = stringPreferencesKey("gemini_api_key")
+        val HAS_COMPLETED_ONBOARDING = booleanPreferencesKey("has_completed_onboarding")
+    }
+    
+    val userPreferencesFlow: Flow<UserPreferences> = context.dataStore.data.map { preferences ->
+        UserPreferences(
+            style = preferences[PreferencesKeys.STYLE]?.let { 
+                MessageStyle.valueOf(it) 
+            } ?: MessageStyle.SENTENCE_CASE,
+            tone = preferences[PreferencesKeys.TONE]?.let { 
+                MessageTone.valueOf(it) 
+            } ?: MessageTone.SMOOTH,
+            flirtLevel = preferences[PreferencesKeys.FLIRT_LEVEL]?.let { 
+                FlirtLevel.valueOf(it) 
+            } ?: FlirtLevel.MEDIUM,
+            replyLength = preferences[PreferencesKeys.REPLY_LENGTH]?.let { 
+                ReplyLength.valueOf(it) 
+            } ?: ReplyLength.NORMAL,
+            emojiUse = preferences[PreferencesKeys.EMOJI_USE]?.let { 
+                EmojiUse.valueOf(it) 
+            } ?: EmojiUse.EXPRESSIVE,
+            profileName = preferences[PreferencesKeys.PROFILE_NAME] ?: "",
+            profileGender = preferences[PreferencesKeys.PROFILE_GENDER] ?: "",
+            profileSexuality = preferences[PreferencesKeys.PROFILE_SEXUALITY] ?: "",
+            profileBio = preferences[PreferencesKeys.PROFILE_BIO] ?: "",
+            profilePronouns = preferences[PreferencesKeys.PROFILE_PRONOUNS] ?: "",
+            geminiApiKey = preferences[PreferencesKeys.GEMINI_API_KEY] ?: "",
+            hasCompletedOnboarding = preferences[PreferencesKeys.HAS_COMPLETED_ONBOARDING] ?: false
+        )
+    }
+    
+    suspend fun updateStyle(style: MessageStyle) {
+        context.dataStore.edit { preferences ->
+            preferences[PreferencesKeys.STYLE] = style.name
+        }
+    }
+    
+    suspend fun updateTone(tone: MessageTone) {
+        context.dataStore.edit { preferences ->
+            preferences[PreferencesKeys.TONE] = tone.name
+        }
+    }
+    
+    suspend fun updateFlirtLevel(level: FlirtLevel) {
+        context.dataStore.edit { preferences ->
+            preferences[PreferencesKeys.FLIRT_LEVEL] = level.name
+        }
+    }
+    
+    suspend fun updateReplyLength(length: ReplyLength) {
+        context.dataStore.edit { preferences ->
+            preferences[PreferencesKeys.REPLY_LENGTH] = length.name
+        }
+    }
+    
+    suspend fun updateEmojiUse(emojiUse: EmojiUse) {
+        context.dataStore.edit { preferences ->
+            preferences[PreferencesKeys.EMOJI_USE] = emojiUse.name
+        }
+    }
+    
+    suspend fun updateProfile(
+        name: String,
+        gender: String,
+        sexuality: String,
+        bio: String,
+        pronouns: String
+    ) {
+        context.dataStore.edit { preferences ->
+            preferences[PreferencesKeys.PROFILE_NAME] = name
+            preferences[PreferencesKeys.PROFILE_GENDER] = gender
+            preferences[PreferencesKeys.PROFILE_SEXUALITY] = sexuality
+            preferences[PreferencesKeys.PROFILE_BIO] = bio
+            preferences[PreferencesKeys.PROFILE_PRONOUNS] = pronouns
+        }
+    }
+    
+    suspend fun updateGeminiApiKey(apiKey: String) {
+        context.dataStore.edit { preferences ->
+            preferences[PreferencesKeys.GEMINI_API_KEY] = apiKey
+        }
+    }
+    
+    suspend fun setOnboardingCompleted() {
+        context.dataStore.edit { preferences ->
+            preferences[PreferencesKeys.HAS_COMPLETED_ONBOARDING] = true
+        }
+    }
+}

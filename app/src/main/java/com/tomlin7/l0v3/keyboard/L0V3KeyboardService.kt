@@ -1,0 +1,520 @@
+package com.tomlin7.l0v3.keyboard
+
+import android.app.Activity
+import android.content.Context
+import android.content.Intent
+import android.graphics.Bitmap
+import android.inputmethodservice.InputMethodService
+import android.media.projection.MediaProjectionManager
+import android.os.Build
+import android.util.Log
+import android.view.View
+import android.view.inputmethod.EditorInfo
+import android.widget.Toast
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.Keyboard
+import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.ComposeView
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleOwner
+import androidx.lifecycle.setViewTreeLifecycleOwner
+import androidx.compose.ui.platform.ViewCompositionStrategy
+import androidx.savedstate.setViewTreeSavedStateRegistryOwner
+import com.tomlin7.l0v3.MainActivity
+import com.tomlin7.l0v3.api.GeminiService
+import com.tomlin7.l0v3.data.PreferencesRepository
+import com.tomlin7.l0v3.data.UserPreferences
+import com.tomlin7.l0v3.service.ScreenshotDetectionService
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
+
+class L0V3KeyboardService : InputMethodService(), LifecycleOwner {
+    
+    private lateinit var preferencesRepository: PreferencesRepository
+    private var geminiService: GeminiService? = null
+    private val serviceScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
+    
+    private var keyboardState by mutableStateOf(KeyboardState.IDLE)
+    private var replySuggestions by mutableStateOf<List<String>>(emptyList())
+    private var errorMessage by mutableStateOf<String?>(null)
+    
+    private var latestScreenshot: Bitmap? = null
+    private var screenshotTimestamp: Long = 0
+    
+    override val lifecycle: Lifecycle
+        get() = lifecycleOwner.lifecycle
+    
+    private val lifecycleOwner = KeyboardLifecycleOwner()
+    
+    enum class KeyboardState {
+        IDLE,
+        CAPTURING,
+        GENERATING,
+        SHOWING_SUGGESTIONS,
+        ERROR
+    }
+    
+    override fun onCreate() {
+        super.onCreate()
+        preferencesRepository = PreferencesRepository(this)
+        
+        serviceScope.launch {
+            val prefs = preferencesRepository.userPreferencesFlow.first()
+            if (prefs.geminiApiKey.isNotEmpty()) {
+                geminiService = GeminiService(prefs.geminiApiKey)
+            }
+        }
+        
+        // Start screenshot detection service
+        startScreenshotDetectionService()
+        
+        // Set up callback for when screenshots are detected
+        ScreenshotDetectionService.onScreenshotDetected = { bitmap ->
+            latestScreenshot = bitmap
+            screenshotTimestamp = System.currentTimeMillis()
+            Log.d("L0V3Keyboard", "Screenshot detected! Ready to generate replies.")
+        }
+        
+        lifecycleOwner.onCreate()
+    }
+    
+    override fun onCreateInputView(): View {
+        lifecycleOwner.onResume()
+        
+        // Set lifecycle owner on the InputMethodService window's DecorView
+        window?.window?.decorView?.let { decorView ->
+            decorView.setViewTreeLifecycleOwner(lifecycleOwner)
+            decorView.setViewTreeSavedStateRegistryOwner(lifecycleOwner)
+        }
+        
+        return ComposeView(this).apply {
+            // Use DisposeOnDetachedFromWindowOrReleasedFromPool strategy for IME
+            setViewCompositionStrategy(
+                ViewCompositionStrategy.DisposeOnDetachedFromWindowOrReleasedFromPool
+            )
+            
+            setContent {
+                L0V3KeyboardTheme {
+                    KeyboardContent(
+                        state = keyboardState,
+                        suggestions = replySuggestions,
+                        errorMessage = errorMessage,
+                        onHeartClick = ::onHeartButtonClicked,
+                        onSuggestionClick = ::onSuggestionClicked,
+                        onSettingsClick = ::openSettings,
+                        onSwitchKeyboard = ::switchToNextKeyboard,
+                        onMicClick = ::startVoiceInput
+                    )
+                }
+            }
+        }
+    }
+    
+    override fun onStartInputView(info: EditorInfo?, restarting: Boolean) {
+        super.onStartInputView(info, restarting)
+        keyboardState = KeyboardState.IDLE
+        replySuggestions = emptyList()
+        errorMessage = null
+    }
+    
+    override fun onFinishInputView(finishingInput: Boolean) {
+        super.onFinishInputView(finishingInput)
+        // Don't pause here as the view might be reused
+    }
+    
+    override fun onDestroy() {
+        super.onDestroy()
+        lifecycleOwner.onDestroy()
+        stopScreenshotService()
+    }
+    
+    private fun onHeartButtonClicked() {
+        serviceScope.launch {
+            val prefs = preferencesRepository.userPreferencesFlow.first()
+            
+            if (prefs.geminiApiKey.isEmpty()) {
+                keyboardState = KeyboardState.ERROR
+                errorMessage = "Please set your Gemini API key in settings"
+                return@launch
+            }
+            
+            if (geminiService == null) {
+                geminiService = GeminiService(prefs.geminiApiKey)
+            }
+            
+            // Check if we have a recent screenshot
+            val screenshot = latestScreenshot
+            val timeSinceScreenshot = System.currentTimeMillis() - screenshotTimestamp
+            
+            if (screenshot != null && timeSinceScreenshot < 10000) {
+                // Screenshot is recent (less than 10 seconds old), use it!
+                generateReplies(screenshot, prefs)
+            } else {
+                // No recent screenshot, ask user to take one
+                keyboardState = KeyboardState.ERROR
+                errorMessage = "Please take a screenshot first (Power + Volume Down), then tap ❤️"
+            }
+        }
+    }
+    
+    private fun startScreenshotDetectionService() {
+        val intent = Intent(this, ScreenshotDetectionService::class.java).apply {
+            action = ScreenshotDetectionService.ACTION_START
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            startForegroundService(intent)
+        } else {
+            startService(intent)
+        }
+    }
+    
+    private fun generateReplies(screenshot: Bitmap, prefs: UserPreferences) {
+        serviceScope.launch {
+            keyboardState = KeyboardState.GENERATING
+            
+            val result = geminiService?.generateReplies(screenshot, prefs)
+            
+            result?.onSuccess { suggestions ->
+                replySuggestions = suggestions
+                keyboardState = KeyboardState.SHOWING_SUGGESTIONS
+                Log.d("L0V3Keyboard", "Generated ${suggestions.size} suggestions")
+            }?.onFailure { error ->
+                keyboardState = KeyboardState.ERROR
+                errorMessage = "Failed to generate replies: ${error.message}"
+                Log.e("L0V3Keyboard", "Error generating replies", error)
+            }
+        }
+    }
+    
+    private fun onSuggestionClicked(suggestion: String) {
+        val ic = currentInputConnection
+        if (ic != null) {
+            ic.commitText(suggestion, 1)
+            // Reset state
+            keyboardState = KeyboardState.IDLE
+            replySuggestions = emptyList()
+        }
+    }
+    
+    private fun openSettings() {
+        val intent = Intent(this, MainActivity::class.java).apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        startActivity(intent)
+    }
+    
+    private fun switchToNextKeyboard() {
+        try {
+            val imeManager = getSystemService(Context.INPUT_METHOD_SERVICE) as android.view.inputmethod.InputMethodManager
+            imeManager.showInputMethodPicker()
+        } catch (e: Exception) {
+            Log.e("L0V3Keyboard", "Error switching keyboard", e)
+        }
+    }
+    
+    private fun startVoiceInput() {
+        try {
+            val intent = Intent(android.speech.RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+                putExtra(
+                    android.speech.RecognizerIntent.EXTRA_LANGUAGE_MODEL,
+                    android.speech.RecognizerIntent.LANGUAGE_MODEL_FREE_FORM
+                )
+            }
+            // Voice input handling would require activity result handling
+            Toast.makeText(this, "Voice input: Please use system keyboard", Toast.LENGTH_SHORT).show()
+        } catch (e: Exception) {
+            Log.e("L0V3Keyboard", "Error starting voice input", e)
+        }
+    }
+    
+    private fun stopScreenshotService() {
+        val intent = Intent(this, ScreenshotDetectionService::class.java).apply {
+            action = ScreenshotDetectionService.ACTION_STOP
+        }
+        startService(intent)
+        ScreenshotDetectionService.onScreenshotDetected = null
+    }
+}
+
+@Composable
+fun KeyboardContent(
+    state: L0V3KeyboardService.KeyboardState,
+    suggestions: List<String>,
+    errorMessage: String?,
+    onHeartClick: () -> Unit,
+    onSuggestionClick: (String) -> Unit,
+    onSettingsClick: () -> Unit,
+    onSwitchKeyboard: () -> Unit,
+    onMicClick: () -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(
+                brush = Brush.verticalGradient(
+                    colors = listOf(
+                        Color(0xFFFFF0F5),
+                        Color(0xFFFFE4E1),
+                        Color(0xFFFFF5EE)
+                    )
+                )
+            )
+            .padding(16.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        when (state) {
+            L0V3KeyboardService.KeyboardState.IDLE -> {
+                IdleState(
+                    onHeartClick = onHeartClick,
+                    onSettingsClick = onSettingsClick,
+                    onSwitchKeyboard = onSwitchKeyboard,
+                    onMicClick = onMicClick
+                )
+            }
+            L0V3KeyboardService.KeyboardState.CAPTURING -> {
+                LoadingState("Capturing screenshot...")
+            }
+            L0V3KeyboardService.KeyboardState.GENERATING -> {
+                LoadingState("Generating replies...")
+            }
+            L0V3KeyboardService.KeyboardState.SHOWING_SUGGESTIONS -> {
+                SuggestionsState(
+                    suggestions = suggestions,
+                    onSuggestionClick = onSuggestionClick,
+                    onBackClick = onHeartClick
+                )
+            }
+            L0V3KeyboardService.KeyboardState.ERROR -> {
+                ErrorState(
+                    message = errorMessage ?: "Something went wrong",
+                    onRetryClick = onHeartClick
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun IdleState(
+    onHeartClick: () -> Unit,
+    onSettingsClick: () -> Unit,
+    onSwitchKeyboard: () -> Unit,
+    onMicClick: () -> Unit
+) {
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        modifier = Modifier.padding(vertical = 16.dp)
+    ) {
+        Text(
+            text = "Type Less. Feel More.",
+            style = MaterialTheme.typography.bodyMedium,
+            color = Color(0xFFD946A6),
+            fontWeight = FontWeight.Medium
+        )
+        
+        Spacer(modifier = Modifier.height(16.dp))
+        
+        // Heart button
+        Box(
+            modifier = Modifier
+                .size(80.dp)
+                .clip(CircleShape)
+                .background(
+                    brush = Brush.radialGradient(
+                        colors = listOf(
+                            Color(0xFFFF69B4),
+                            Color(0xFFD946A6)
+                        )
+                    )
+                )
+                .clickable(onClick = onHeartClick),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                imageVector = Icons.Default.Favorite,
+                contentDescription = "Generate replies",
+                tint = Color.White,
+                modifier = Modifier.size(40.dp)
+            )
+        }
+        
+        Spacer(modifier = Modifier.height(8.dp))
+        
+        Text(
+            text = "1. Take a screenshot (Power + Vol Down)\n2. Tap ❤️ for AI replies",
+            style = MaterialTheme.typography.bodySmall,
+            color = Color.Gray,
+            textAlign = TextAlign.Center
+        )
+        
+        Spacer(modifier = Modifier.height(16.dp))
+        
+        // Bottom controls
+        Row(
+            horizontalArrangement = Arrangement.SpaceEvenly,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            IconButton(onClick = onMicClick) {
+                Icon(
+                    imageVector = Icons.Default.Mic,
+                    contentDescription = "Voice input",
+                    tint = Color(0xFFD946A6)
+                )
+            }
+            
+            IconButton(onClick = onSwitchKeyboard) {
+                Icon(
+                    imageVector = Icons.Default.Keyboard,
+                    contentDescription = "Switch keyboard",
+                    tint = Color(0xFFD946A6)
+                )
+            }
+            
+            IconButton(onClick = onSettingsClick) {
+                Icon(
+                    imageVector = Icons.Default.Settings,
+                    contentDescription = "Settings",
+                    tint = Color(0xFFD946A6)
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun LoadingState(message: String) {
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        modifier = Modifier.padding(32.dp)
+    ) {
+        CircularProgressIndicator(
+            color = Color(0xFFD946A6),
+            modifier = Modifier.size(48.dp)
+        )
+        Spacer(modifier = Modifier.height(16.dp))
+        Text(
+            text = message,
+            style = MaterialTheme.typography.bodyMedium,
+            color = Color.Gray
+        )
+    }
+}
+
+@Composable
+fun SuggestionsState(
+    suggestions: List<String>,
+    onSuggestionClick: (String) -> Unit,
+    onBackClick: () -> Unit
+) {
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Text(
+            text = "Choose a reply:",
+            style = MaterialTheme.typography.titleSmall,
+            color = Color(0xFFD946A6),
+            fontWeight = FontWeight.SemiBold,
+            modifier = Modifier.padding(bottom = 12.dp)
+        )
+        
+        suggestions.forEachIndexed { index, suggestion ->
+            SuggestionCard(
+                text = suggestion,
+                onClick = { onSuggestionClick(suggestion) }
+            )
+            if (index < suggestions.size - 1) {
+                Spacer(modifier = Modifier.height(8.dp))
+            }
+        }
+        
+        Spacer(modifier = Modifier.height(12.dp))
+        
+        TextButton(
+            onClick = onBackClick,
+            modifier = Modifier.align(Alignment.CenterHorizontally)
+        ) {
+            Text("Generate new replies", color = Color(0xFFD946A6))
+        }
+    }
+}
+
+@Composable
+fun SuggestionCard(text: String, onClick: () -> Unit) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = Color.White
+        ),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+    ) {
+        Text(
+            text = text,
+            modifier = Modifier.padding(16.dp),
+            style = MaterialTheme.typography.bodyMedium,
+            color = Color(0xFF1F1F1F)
+        )
+    }
+}
+
+@Composable
+fun ErrorState(message: String, onRetryClick: () -> Unit) {
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        modifier = Modifier.padding(24.dp)
+    ) {
+        Text(
+            text = "⚠️",
+            fontSize = 48.sp
+        )
+        Spacer(modifier = Modifier.height(12.dp))
+        Text(
+            text = message,
+            style = MaterialTheme.typography.bodyMedium,
+            color = Color.Gray,
+            textAlign = TextAlign.Center
+        )
+        Spacer(modifier = Modifier.height(16.dp))
+        Button(
+            onClick = onRetryClick,
+            colors = ButtonDefaults.buttonColors(
+                containerColor = Color(0xFFD946A6)
+            )
+        ) {
+            Text("Retry")
+        }
+    }
+}
+
+@Composable
+fun L0V3KeyboardTheme(content: @Composable () -> Unit) {
+    MaterialTheme(
+        colorScheme = lightColorScheme(
+            primary = Color(0xFFD946A6),
+            secondary = Color(0xFFFF69B4),
+            background = Color(0xFFFFF0F5)
+        ),
+        content = content
+    )
+}
