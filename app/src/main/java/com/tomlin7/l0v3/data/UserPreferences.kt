@@ -17,9 +17,7 @@ data class UserPreferences(
 
 enum class MessageStyle(val displayName: String) {
     LOWERCASE("lowercase"),
-    SENTENCE_CASE("Sentence case"),
-    EMOJI_RICH("emoji-rich 🎉"),
-    POETIC("Poetic")
+    SENTENCE_CASE("Sentence case")
 }
 
 enum class MessageTone(val displayName: String) {
@@ -30,8 +28,8 @@ enum class MessageTone(val displayName: String) {
 }
 
 enum class FlirtLevel(val displayName: String) {
-    LOW("Low"),
-    MEDIUM("Medium"),
+    LESS("Less"),
+    MEDIUM("Moderate"),
     BOLD("Bold")
 }
 
@@ -42,6 +40,7 @@ enum class ReplyLength(val displayName: String) {
 }
 
 enum class EmojiUse(val displayName: String) {
+    NEVER("Never"),
     MINIMAL("Minimal"),
     EXPRESSIVE("Expressive")
 }

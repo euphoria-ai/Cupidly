@@ -8,18 +8,14 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import com.tomlin7.l0v3.L0V3Application
+import com.tomlin7.l0v3.ui.screens.guide.GuideScreen
 import com.tomlin7.l0v3.ui.screens.home.HomeScreen
-import com.tomlin7.l0v3.ui.screens.message.MessageSettingsScreen
 import com.tomlin7.l0v3.ui.screens.onboarding.OnboardingScreen
-import com.tomlin7.l0v3.ui.screens.privacy.PrivacyScreen
-import com.tomlin7.l0v3.ui.screens.profile.ProfileScreen
 
 sealed class Screen(val route: String) {
     object Onboarding : Screen("onboarding")
     object Home : Screen("home")
-    object MessageSettings : Screen("message_settings")
-    object Profile : Screen("profile")
-    object Privacy : Screen("privacy")
+    object Guide : Screen("guide")
 }
 
 @Composable
@@ -57,37 +53,16 @@ fun L0V3Navigation() {
         
         composable(Screen.Home.route) {
             HomeScreen(
-                onNavigateToMessageSettings = {
-                    navController.navigate(Screen.MessageSettings.route)
+                onNavigateToGuide = {
+                    navController.navigate(Screen.Guide.route)
                 },
-                onNavigateToProfile = {
-                    navController.navigate(Screen.Profile.route)
-                },
-                onNavigateToPrivacy = {
-                    navController.navigate(Screen.Privacy.route)
-                },
-                userPreferences = userPreferences
-            )
-        }
-        
-        composable(Screen.MessageSettings.route) {
-            MessageSettingsScreen(
-                onNavigateBack = { navController.popBackStack() },
                 preferencesRepository = preferencesRepository,
                 userPreferences = userPreferences
             )
         }
         
-        composable(Screen.Profile.route) {
-            ProfileScreen(
-                onNavigateBack = { navController.popBackStack() },
-                preferencesRepository = preferencesRepository,
-                userPreferences = userPreferences
-            )
-        }
-        
-        composable(Screen.Privacy.route) {
-            PrivacyScreen(
+        composable(Screen.Guide.route) {
+            GuideScreen(
                 onNavigateBack = { navController.popBackStack() }
             )
         }

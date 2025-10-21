@@ -12,15 +12,18 @@ import android.view.View
 import android.view.inputmethod.EditorInfo
 import android.widget.Toast
 import androidx.compose.animation.core.*
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Backspace
 import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.ui.res.painterResource
+import com.tomlin7.l0v3.R
 import androidx.compose.material.icons.filled.Keyboard
-import androidx.compose.material.icons.filled.Backspace
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -365,10 +368,9 @@ fun IdleState(
                 .clickable(onClick = onHeartClick),
             contentAlignment = Alignment.Center
         ) {
-            Icon(
-                imageVector = Icons.Default.Favorite,
+            Image(
+                painter = painterResource(id = R.drawable.heart),
                 contentDescription = "Generate replies",
-                tint = Color.White,
                 modifier = Modifier.size(40.dp)
             )
         }
@@ -376,7 +378,16 @@ fun IdleState(
         Spacer(modifier = Modifier.height(8.dp))
         
         Text(
-            text = "1. Take a screenshot (Power + Vol Down)\n2. AI replies generate automatically!\n3. Tap ❤️ to view replies",
+            text = "Take a screenshot",
+            style = MaterialTheme.typography.bodyMedium,
+            color = Color.Gray,
+            textAlign = TextAlign.Center
+        )
+        
+        Spacer(modifier = Modifier.height(8.dp))
+        
+        Text(
+            text = "We'll do the rest",
             style = MaterialTheme.typography.bodySmall,
             color = Color.Gray,
             textAlign = TextAlign.Center
@@ -391,7 +402,7 @@ fun IdleState(
         ) {
             IconButton(onClick = onBackspaceClick) {
                 Icon(
-                    imageVector = Icons.Default.Backspace,
+                    imageVector = Icons.AutoMirrored.Default.Backspace,
                     contentDescription = "Backspace",
                     tint = Color(0xFFD946A6)
                 )

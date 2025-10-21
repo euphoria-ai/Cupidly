@@ -113,4 +113,21 @@ class PreferencesRepository(private val context: Context) {
             preferences[PreferencesKeys.HAS_COMPLETED_ONBOARDING] = true
         }
     }
+    
+    suspend fun updateUserPreferences(userPreferences: UserPreferences) {
+        context.dataStore.edit { preferences ->
+            preferences[PreferencesKeys.STYLE] = userPreferences.style.name
+            preferences[PreferencesKeys.TONE] = userPreferences.tone.name
+            preferences[PreferencesKeys.FLIRT_LEVEL] = userPreferences.flirtLevel.name
+            preferences[PreferencesKeys.REPLY_LENGTH] = userPreferences.replyLength.name
+            preferences[PreferencesKeys.EMOJI_USE] = userPreferences.emojiUse.name
+            preferences[PreferencesKeys.PROFILE_NAME] = userPreferences.profileName
+            preferences[PreferencesKeys.PROFILE_GENDER] = userPreferences.profileGender
+            preferences[PreferencesKeys.PROFILE_SEXUALITY] = userPreferences.profileSexuality
+            preferences[PreferencesKeys.PROFILE_BIO] = userPreferences.profileBio
+            preferences[PreferencesKeys.PROFILE_PRONOUNS] = userPreferences.profilePronouns
+            preferences[PreferencesKeys.GEMINI_API_KEY] = userPreferences.geminiApiKey
+            preferences[PreferencesKeys.HAS_COMPLETED_ONBOARDING] = userPreferences.hasCompletedOnboarding
+        }
+    }
 }
