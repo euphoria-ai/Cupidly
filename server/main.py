@@ -90,10 +90,8 @@ def build_prompt(preferences: UserPreferences) -> str:
         "3. Match the conversation context and tone",
         "4. Keep replies natural and conversational",
         "5. Apply the user's style preferences to each reply",
-        "6. In messaging apps: the messages on right side are the user's and the messages on left side are the incoming",
-        "7. Always answer from the user's perspective",
         "",
-        "Generate three distinct replies that would work well in this conversation."
+        "Generate the replies now:"
     ])
     
     return "\n".join(prompt_parts)
