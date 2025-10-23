@@ -1,0 +1,6 @@
+fastapi
+uvicorn[standard]
+google-genai[aiohttp]
+pillow
+python-dotenv
+pydantic
