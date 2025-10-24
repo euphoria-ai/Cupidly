@@ -9,12 +9,22 @@ from PIL import Image
 from google import genai
 from google.genai import types
 from dotenv import load_dotenv
+import time
 
 load_dotenv()
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 if not GEMINI_API_KEY:
     raise ValueError("GEMINI_API_KEY environment variable is required")
+
+# Global client for connection reuse
+_client = None
+
+async def get_client():
+    global _client
+    if _client is None:
+        _client = genai.Client(api_key=GEMINI_API_KEY)
+    return _client
 
 app = FastAPI(
     title="L0V3",
@@ -61,46 +71,53 @@ class ReplySuggestions(BaseModel):
 
 MODEL_NAME = "gemini-2.5-flash"
 
+# Pre-built prompt template for speed
+PROMPT_TEMPLATE = """You are an flirting assistant helping to generate flirty replies for chat conversations.
+
+Analyze the chat screenshot and generate EXACTLY 3 different flirty reply options.
+Make sure to follow the user's preferences strictly.
+
+USER PREFERENCES:
+- Style: {style} preferred
+- Tone: {tone} preferred
+- Flirt Level: {flirt_level} preferred
+- Reply Length: {reply_length} preferred
+- Emoji Use: {emoji_use} preferred{profile_info}
+
+IMPORTANT INSTRUCTIONS:
+1. FOLLOW THE USER'S PREFERENCES STRICTLY!
+2. Flirt level: LESS means less flirty, MEDIUM means moderate flirty, BOLD means too much flirty
+3. Reply length: SHORT means very short (3-4 words), NORMAL means average message length, EXTENDED means 1-2 sentences
+4. Emoji use: NEVER means never use emojis, MINIMAL means some replies can have one emoji, EXPRESSIVE means most replies can have emojis
+5. Generate EXACTLY 3 distinct reply options
+6. Make each reply unique
+7. Match the conversation context and tone
+8. Keep replies natural and short
+
+Follow the user's preferences strictly and generate three distinct replies now:"""
+
 def build_prompt(preferences: UserPreferences) -> str:
-    prompt_parts = [
-        "You are an flirting assistant helping to generate flirty replies for chat conversations.",
-        "",
-        "Analyze the chat screenshot and generate EXACTLY 3 different flirty reply options.",
-        "Make sure to follow the user's preferences strictly.",
-        "",
-        "USER PREFERENCES:",
-        f"- Style: {preferences.style} preferred",
-        f"- Tone: {preferences.tone} preferred",
-        f"- Flirt Level: {preferences.flirt_level} preferred",
-        f"- Reply Length: {preferences.reply_length} preferred",
-        f"- Emoji Use: {preferences.emoji_use} preferred",
-    ]
-    
+    # Build profile info string efficiently
+    profile_parts = []
     if preferences.profile_name:
-        prompt_parts.append(f"- Name: {preferences.profile_name}")
+        profile_parts.append(f"- Name: {preferences.profile_name}")
     if preferences.profile_gender:
-        prompt_parts.append(f"- Gender: {preferences.profile_gender}")
+        profile_parts.append(f"- Gender: {preferences.profile_gender}")
     if preferences.profile_pronouns:
-        prompt_parts.append(f"- Pronouns: {preferences.profile_pronouns}")
+        profile_parts.append(f"- Pronouns: {preferences.profile_pronouns}")
     if preferences.profile_bio:
-        prompt_parts.append(f"- About: {preferences.profile_bio}")
+        profile_parts.append(f"- About: {preferences.profile_bio}")
     
-    prompt_parts.extend([
-        "",
-        "IMPORTANT INSTRUCTIONS:",
-        "1. FOLLOW THE USER'S PREFERENCES STRICTLY!",
-        "2. Flirt level: LESS means less flirty, MEDIUM means moderate flirty, BOLD means too much flirty",
-        "3. Reply length: SHORT means very short (3-4 words), NORMAL means average message length, EXTENDED means 1-2 sentences",
-        "4. Emoji use: NEVER means never use emojis, MINIMAL means some replies can have one emoji, EXPRESSIVE means most replies can have emojis",
-        "5. Generate EXACTLY 3 distinct reply options",
-        "6. Make each reply unique",
-        "7. Match the conversation context and tone",
-        "8. Keep replies natural and short",
-        "",
-        "Follow the user's preferences strictly and generate three distinct replies now:"
-    ])
+    profile_info = "\n" + "\n".join(profile_parts) if profile_parts else ""
     
-    return "\n".join(prompt_parts)
+    return PROMPT_TEMPLATE.format(
+        style=preferences.style,
+        tone=preferences.tone,
+        flirt_level=preferences.flirt_level,
+        reply_length=preferences.reply_length,
+        emoji_use=preferences.emoji_use,
+        profile_info=profile_info
+    )
 
 @app.get("/")
 async def root():
@@ -112,10 +129,18 @@ async def root():
 
 @app.post("/generate-replies", response_model=GenerateRepliesResponse)
 async def generate_replies(request: GenerateRepliesRequest):
+    start_time = time.time()
+    
     try:
         try:
             image_data = base64.b64decode(request.screenshot_base64)
             image = Image.open(io.BytesIO(image_data))
+            
+            if image.width > 1024:
+                ratio = 1024 / image.width
+                new_height = int(image.height * ratio)
+                image = image.resize((1024, new_height), Image.Resampling.LANCZOS)
+            
         except Exception as e:
             raise HTTPException(
                 status_code=400,
@@ -126,7 +151,7 @@ async def generate_replies(request: GenerateRepliesRequest):
         
         try:
             img_byte_arr = io.BytesIO()
-            image.save(img_byte_arr, format='JPEG')
+            image.save(img_byte_arr, format='JPEG', quality=85, optimize=True)
             img_byte_arr = img_byte_arr.getvalue()
             
             contents = [
@@ -134,7 +159,8 @@ async def generate_replies(request: GenerateRepliesRequest):
                 types.Part.from_text(text=prompt)
             ]
             
-            async with genai.Client(api_key=GEMINI_API_KEY).aio as aclient:
+            client = await get_client()
+            async with client.aio as aclient:
                 response = await aclient.models.generate_content(
                     model=MODEL_NAME,
                     contents=contents,
@@ -157,6 +183,10 @@ async def generate_replies(request: GenerateRepliesRequest):
                 reply_suggestions.option_3.reply
             ]
             
+            # Log performance for monitoring
+            processing_time = time.time() - start_time
+            print(f"Request processed in {processing_time:.3f}s")
+            
             return GenerateRepliesResponse(suggestions=suggestions)
             
         except Exception as e:
@@ -176,5 +206,15 @@ async def generate_replies(request: GenerateRepliesRequest):
 if __name__ == "__main__":
     import uvicorn
     port = int(os.getenv("PORT", 8000))
-    uvicorn.run(app, host="0.0.0.0", port=port)
+    # Optimized uvicorn settings for speed
+    uvicorn.run(
+        app, 
+        host="0.0.0.0", 
+        port=port,
+        workers=1,  # Single worker for this use case
+        loop="asyncio",
+        http="httptools",  # Faster HTTP parser
+        ws="websockets",
+        log_level="warning"  # Reduce logging overhead
+    )
 
