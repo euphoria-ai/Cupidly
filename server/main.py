@@ -1,7 +1,7 @@
 import os
 import base64
 import io
-from typing import List, Optional
+from typing import List, Literal, Optional
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
@@ -30,15 +30,17 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
+# PreferencesDto(style=LOWERCASE, tone=GEN_Z_SLANG, flirtLevel=MEDIUM, replyLength=SHORT, emojiUse=EXPRESSIVE, profileName=, profileGender=Male, profilePronouns=he/him, profileBio=)
 class UserPreferences(BaseModel):
-    style: str
-    tone: str
-    flirt_level: str
-    reply_length: str
-    emoji_use: str
+    style: Literal["LOWERCASE", "SENTENCE_CASE"]
+    tone: Literal["GEN_Z_SLANG", "RESPECTFUL", "FUNNY", "SMOOTH"]
+    flirt_level: Literal["LESS", "MEDIUM", "BOLD"]
+    reply_length: Literal["SHORT", "NORMAL", "EXTENDED"]
+    emoji_use: Literal["NEVER", "MINIMAL", "EXPRESSIVE"]
     profile_name: Optional[str] = ""
-    profile_gender: Optional[str] = ""
-    profile_pronouns: Optional[str] = ""
+    profile_gender: Optional[str] = "Male"
+    profile_pronouns: Optional[str] = "he/him"
     profile_bio: Optional[str] = ""
 
 class GenerateRepliesRequest(BaseModel):
@@ -66,11 +68,11 @@ def build_prompt(preferences: UserPreferences) -> str:
         "Analyze the chat screenshot and generate EXACTLY 3 different reply options.",
         "",
         "USER PREFERENCES:",
-        f"- Style: {preferences.style}",
-        f"- Tone: {preferences.tone}",
-        f"- Flirt Level: {preferences.flirt_level}",
-        f"- Reply Length: {preferences.reply_length}",
-        f"- Emoji Use: {preferences.emoji_use}",
+        f"- Style: {preferences.style} (LOWERCASE means use lowercase language, SENTENCE_CASE means use sentence case language)",
+        f"- Tone: {preferences.tone} (GEN_Z_SLANG means use Gen-Z slang, RESPECTFUL means use respectful language, FUNNY means use funny language, SMOOTH means use smooth language)",
+        f"- Flirt Level: {preferences.flirt_level} (LESS means less flirty, MEDIUM means moderate flirty, BOLD means too much flirty)",
+        f"- Reply Length: {preferences.reply_length} (SHORT means very short message length, NORMAL means average message length, EXTENDED means 1-2 sentences)",
+        f"- Emoji Use: {preferences.emoji_use} (NEVER means never use emojis, MINIMAL means some replies can have one emoji, EXPRESSIVE means most replies can have emojis)",
     ]
     
     if preferences.profile_name:
