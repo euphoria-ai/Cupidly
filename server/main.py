@@ -63,16 +63,17 @@ MODEL_NAME = "gemini-2.5-flash"
 
 def build_prompt(preferences: UserPreferences) -> str:
     prompt_parts = [
-        "You are an AI texting assistant helping to generate replies for chat conversations.",
+        "You are an flirting assistant helping to generate flirty replies for chat conversations.",
         "",
-        "Analyze the chat screenshot and generate EXACTLY 3 different reply options.",
+        "Analyze the chat screenshot and generate EXACTLY 3 different flirty reply options.",
+        "Make sure to follow the user's preferences strictly.",
         "",
         "USER PREFERENCES:",
-        f"- Style: {preferences.style} (LOWERCASE means use lowercase language, SENTENCE_CASE means use sentence case language)",
-        f"- Tone: {preferences.tone} (GEN_Z_SLANG means use Gen-Z slang, RESPECTFUL means use respectful language, FUNNY means use funny language, SMOOTH means use smooth language)",
-        f"- Flirt Level: {preferences.flirt_level} (LESS means less flirty, MEDIUM means moderate flirty, BOLD means too much flirty)",
-        f"- Reply Length: {preferences.reply_length} (SHORT means very short message length, NORMAL means average message length, EXTENDED means 1-2 sentences)",
-        f"- Emoji Use: {preferences.emoji_use} (NEVER means never use emojis, MINIMAL means some replies can have one emoji, EXPRESSIVE means most replies can have emojis)",
+        f"- Style: {preferences.style} preferred",
+        f"- Tone: {preferences.tone} preferred",
+        f"- Flirt Level: {preferences.flirt_level} preferred",
+        f"- Reply Length: {preferences.reply_length} preferred",
+        f"- Emoji Use: {preferences.emoji_use} preferred",
     ]
     
     if preferences.profile_name:
@@ -87,13 +88,16 @@ def build_prompt(preferences: UserPreferences) -> str:
     prompt_parts.extend([
         "",
         "IMPORTANT INSTRUCTIONS:",
-        "1. Generate EXACTLY 3 distinct reply options",
-        "2. Make each reply unique in approach",
-        "3. Match the conversation context and tone",
-        "4. Keep replies natural and conversational",
-        "5. Apply the user's style preferences to each reply",
+        "1. FOLLOW THE USER'S PREFERENCES STRICTLY!",
+        "2. Flirt level: LESS means less flirty, MEDIUM means moderate flirty, BOLD means too much flirty",
+        "3. Reply length: SHORT means very short (3-4 words), NORMAL means average message length, EXTENDED means 1-2 sentences",
+        "4. Emoji use: NEVER means never use emojis, MINIMAL means some replies can have one emoji, EXPRESSIVE means most replies can have emojis",
+        "5. Generate EXACTLY 3 distinct reply options",
+        "6. Make each reply unique",
+        "7. Match the conversation context and tone",
+        "8. Keep replies natural and short",
         "",
-        "Generate the replies now:"
+        "Follow the user's preferences strictly and generate three distinct replies now:"
     ])
     
     return "\n".join(prompt_parts)
