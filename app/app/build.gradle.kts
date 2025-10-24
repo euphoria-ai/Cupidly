@@ -80,8 +80,9 @@ dependencies {
     // Coroutines
     implementation(libs.kotlinx.coroutines.android)
     
-    // Gemini API
-    implementation("com.google.ai.client.generativeai:generativeai:0.9.0")
+    // Retrofit for HTTP client
+    implementation(libs.retrofit)
+    implementation(libs.converter.gson)
     
     // Gson for JSON parsing
     implementation(libs.gson)

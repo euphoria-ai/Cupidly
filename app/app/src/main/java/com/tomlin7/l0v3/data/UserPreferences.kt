@@ -12,7 +12,6 @@ data class UserPreferences(
     val profileSexuality: String = "",
     val profileBio: String = "",
     val profilePronouns: String = "",
-    val geminiApiKey: String = "",
     val hasCompletedOnboarding: Boolean = false
 )
 

@@ -26,7 +26,6 @@ class PreferencesRepository(private val context: Context) {
         val PROFILE_SEXUALITY = stringPreferencesKey("profile_sexuality")
         val PROFILE_BIO = stringPreferencesKey("profile_bio")
         val PROFILE_PRONOUNS = stringPreferencesKey("profile_pronouns")
-        val GEMINI_API_KEY = stringPreferencesKey("gemini_api_key")
         val HAS_COMPLETED_ONBOARDING = booleanPreferencesKey("has_completed_onboarding")
     }
     
@@ -55,7 +54,6 @@ class PreferencesRepository(private val context: Context) {
             profileSexuality = preferences[PreferencesKeys.PROFILE_SEXUALITY] ?: "",
             profileBio = preferences[PreferencesKeys.PROFILE_BIO] ?: "",
             profilePronouns = preferences[PreferencesKeys.PROFILE_PRONOUNS] ?: "",
-            geminiApiKey = preferences[PreferencesKeys.GEMINI_API_KEY] ?: "",
             hasCompletedOnboarding = preferences[PreferencesKeys.HAS_COMPLETED_ONBOARDING] ?: false
         )
     }
@@ -112,12 +110,6 @@ class PreferencesRepository(private val context: Context) {
         }
     }
     
-    suspend fun updateGeminiApiKey(apiKey: String) {
-        context.dataStore.edit { preferences ->
-            preferences[PreferencesKeys.GEMINI_API_KEY] = apiKey
-        }
-    }
-    
     suspend fun setOnboardingCompleted() {
         context.dataStore.edit { preferences ->
             preferences[PreferencesKeys.HAS_COMPLETED_ONBOARDING] = true
@@ -137,7 +129,6 @@ class PreferencesRepository(private val context: Context) {
             preferences[PreferencesKeys.PROFILE_SEXUALITY] = userPreferences.profileSexuality
             preferences[PreferencesKeys.PROFILE_BIO] = userPreferences.profileBio
             preferences[PreferencesKeys.PROFILE_PRONOUNS] = userPreferences.profilePronouns
-            preferences[PreferencesKeys.GEMINI_API_KEY] = userPreferences.geminiApiKey
             preferences[PreferencesKeys.HAS_COMPLETED_ONBOARDING] = userPreferences.hasCompletedOnboarding
         }
     }

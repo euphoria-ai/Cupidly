@@ -19,7 +19,7 @@ import android.os.Looper
 import android.provider.MediaStore
 import android.util.Log
 import androidx.core.app.NotificationCompat
-import com.tomlin7.l0v3.api.GeminiService
+import com.tomlin7.l0v3.api.ApiService
 import com.tomlin7.l0v3.data.PreferencesRepository
 import com.tomlin7.l0v3.data.UserPreferences
 import kotlinx.coroutines.*
@@ -33,6 +33,7 @@ class ScreenshotDetectionService : Service() {
     private var lastScreenshotPath: String? = null
     private var lastScreenshotTime: Long = 0
     private lateinit var preferencesRepository: PreferencesRepository
+    private lateinit var apiService: ApiService
     
     companion object {
         const val ACTION_START = "com.tomlin7.l0v3.ACTION_START_DETECTION"
@@ -50,6 +51,7 @@ class ScreenshotDetectionService : Service() {
         super.onCreate()
         createNotificationChannel()
         preferencesRepository = PreferencesRepository(this)
+        apiService = ApiService()
     }
     
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -227,13 +229,7 @@ class ScreenshotDetectionService : Service() {
             try {
                 val prefs = preferencesRepository.userPreferencesFlow.first()
                 
-                if (prefs.geminiApiKey.isEmpty()) {
-                    Log.w("ScreenshotDetection", "No API key available for auto-reply generation")
-                    return@launch
-                }
-                
-                val geminiService = GeminiService(prefs.geminiApiKey)
-                val result = geminiService.generateReplies(bitmap, prefs)
+                val result = apiService.generateReplies(bitmap, prefs)
                 
                 result.onSuccess { replies ->
                     withContext(Dispatchers.Main) {

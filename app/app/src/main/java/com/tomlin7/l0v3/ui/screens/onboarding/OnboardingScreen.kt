@@ -28,7 +28,6 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.tomlin7.l0v3.R
@@ -42,10 +41,9 @@ fun OnboardingScreen(
     onComplete: () -> Unit,
     preferencesRepository: PreferencesRepository
 ) {
-    val pagerState = rememberPagerState(pageCount = { 3 })
+    val pagerState = rememberPagerState(pageCount = { 2 })
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
-    var apiKey by remember { mutableStateOf("") }
     
     // Get current theme preference
     val userPreferences by preferencesRepository.userPreferencesFlow.collectAsState(
@@ -65,7 +63,7 @@ fun OnboardingScreen(
                 .padding(24.dp),
             horizontalArrangement = Arrangement.Center
         ) {
-            repeat(3) { index ->
+            repeat(2) { index ->
                 val isActive = pagerState.currentPage == index
                 val width by animateDpAsState(
                     targetValue = if (isActive) 24.dp else 8.dp,
@@ -88,7 +86,7 @@ fun OnboardingScreen(
                         )
                 )
                 
-                if (index < 2) {
+                if (index < 1) {
                     Spacer(modifier = Modifier.width(8.dp))
                 }
             }
@@ -101,11 +99,7 @@ fun OnboardingScreen(
         ) { page ->
             when (page) {
                 0 -> WelcomeSlide()
-                1 -> ApiKeySlide(
-                    apiKey = apiKey,
-                    onApiKeyChange = { apiKey = it }
-                )
-                2 -> EnableKeyboardSlide(context = context)
+                1 -> EnableKeyboardSlide(context = context)
             }
         }
         
@@ -133,8 +127,7 @@ fun OnboardingScreen(
             PebbleButton(
                 text = when (pagerState.currentPage) {
                     0 -> "Next"
-                    1 -> if (apiKey.isNotBlank()) "Continue" else "Skip"
-                    2 -> "Finish"
+                    1 -> "Finish"
                     else -> "Next"
                 },
                 onClick = {
@@ -145,14 +138,6 @@ fun OnboardingScreen(
                             }
                         }
                         1 -> {
-                            scope.launch {
-                                if (apiKey.isNotBlank()) {
-                                    preferencesRepository.updateGeminiApiKey(apiKey)
-                                }
-                                pagerState.animateScrollToPage(2)
-                            }
-                        }
-                        2 -> {
                             scope.launch {
                                 preferencesRepository.setOnboardingCompleted()
                                 onComplete()
@@ -202,62 +187,6 @@ fun WelcomeSlide() {
             fontWeight = FontWeight.SemiBold,
             color = MaterialTheme.colorScheme.onBackground,
             textAlign = TextAlign.Center
-        )
-    }
-}
-
-@Composable
-fun ApiKeySlide(
-    apiKey: String,
-    onApiKeyChange: (String) -> Unit
-) {
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(32.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center
-    ) {
-        Icon(
-            imageVector = Icons.Default.Key,
-            contentDescription = null,
-            modifier = Modifier.size(80.dp),
-            tint = MaterialTheme.colorScheme.primary
-        )
-        
-        Spacer(modifier = Modifier.height(32.dp))
-        
-        Text(
-            text = "Connect AI",
-            style = MaterialTheme.typography.headlineMedium,
-            fontWeight = FontWeight.SemiBold,
-            color = MaterialTheme.colorScheme.onBackground,
-            textAlign = TextAlign.Center
-        )
-        
-        Spacer(modifier = Modifier.height(16.dp))
-        
-        Text(
-            text = "Add your Gemini API key for smart suggestions",
-            style = MaterialTheme.typography.bodyLarge,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            textAlign = TextAlign.Center
-        )
-        
-        Spacer(modifier = Modifier.height(32.dp))
-        
-        OutlinedTextField(
-            value = apiKey,
-            onValueChange = onApiKeyChange,
-            modifier = Modifier.fillMaxWidth(),
-            label = { Text("API Key") },
-            placeholder = { Text("AIza...") },
-            visualTransformation = PasswordVisualTransformation(),
-            singleLine = true,
-            colors = OutlinedTextFieldDefaults.colors(
-                focusedBorderColor = MaterialTheme.colorScheme.primary,
-                focusedLabelColor = MaterialTheme.colorScheme.primary
-            )
         )
     }
 }
