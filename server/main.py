@@ -172,11 +172,18 @@ async def generate_replies(request: GenerateRepliesRequest):
                         contents=contents,
                         config=types.GenerateContentConfig(
                             response_mime_type="application/json",
-                            temperature=0.7,
+                            response_schema=ReplySuggestions,
                         )
                     )
 
-                if response.text:
+                if response.parsed:
+                    reply_suggestions: ReplySuggestions = response.parsed
+                    suggestions = [
+                        reply_suggestions.option_1.reply,
+                        reply_suggestions.option_2.reply,
+                        reply_suggestions.option_3.reply
+                    ]
+                elif response.text:
                     import json
                     try:
                         data = json.loads(response.text)
@@ -196,6 +203,7 @@ async def generate_replies(request: GenerateRepliesRequest):
                 if suggestions and len(suggestions) >= 3:
                     break
             except Exception as e:
+                print(f"Model {model} failed: {e}")
                 last_error = e
                 continue
 
