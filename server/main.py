@@ -69,7 +69,7 @@ class ReplySuggestions(BaseModel):
     option_2: ReplyOption = Field(description="Second reply option")
     option_3: ReplyOption = Field(description="Third reply option")
 
-MODEL_NAMES = ["gemini-2.5-flash", "gemini-1.5-flash"]
+MODEL_NAMES = ["gemini-3.5-flash-lite", "gemini-2.5-flash"]
 
 # Pre-built prompt template for speed
 PROMPT_TEMPLATE = """You are an flirting assistant helping to generate flirty replies for chat conversations.
