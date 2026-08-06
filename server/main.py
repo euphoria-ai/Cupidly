@@ -129,11 +129,12 @@ async def generate_replies(request: GenerateRepliesRequest):
     start_time = time.time()
 
     try:
+        decode_start = time.time()
         try:
             image_data = base64.b64decode(request.screenshot_base64)
             image = Image.open(io.BytesIO(image_data))
 
-            # Optimize resizing: 640px width max using BILINEAR for speed on Render CPU
+            # Only resize if Android client sent a larger image (safety net)
             if image.width > 640:
                 ratio = 640 / image.width
                 new_height = int(image.height * ratio)
@@ -150,6 +151,7 @@ async def generate_replies(request: GenerateRepliesRequest):
         img_byte_arr = io.BytesIO()
         image.save(img_byte_arr, format='JPEG', quality=70)
         img_byte_arr = img_byte_arr.getvalue()
+        decode_time = time.time() - decode_start
 
         contents = [
             types.Part.from_bytes(data=img_byte_arr, mime_type="image/jpeg"),
@@ -163,14 +165,19 @@ async def generate_replies(request: GenerateRepliesRequest):
 
         for model in MODEL_NAMES:
             try:
+                gemini_start = time.time()
                 response = await client.aio.models.generate_content(
                     model=model,
                     contents=contents,
                     config=types.GenerateContentConfig(
                         response_mime_type="application/json",
                         response_schema=ReplySuggestions,
+                        thinking_config=types.ThinkingConfig(thinking_budget=0),
+                        max_output_tokens=150,
+                        temperature=0.7,
                     )
                 )
+                gemini_time = time.time() - gemini_start
 
                 if response.parsed:
                     reply_suggestions: ReplySuggestions = response.parsed
@@ -197,6 +204,7 @@ async def generate_replies(request: GenerateRepliesRequest):
                         pass
 
                 if suggestions and len(suggestions) >= 3:
+                    print(f"[PERF] Model {model}: gemini={gemini_time:.3f}s | decode={decode_time:.3f}s")
                     break
             except Exception as e:
                 print(f"Model {model} failed: {e}")
@@ -211,7 +219,7 @@ async def generate_replies(request: GenerateRepliesRequest):
 
         # Log performance for monitoring
         processing_time = time.time() - start_time
-        print(f"Request processed in {processing_time:.3f}s")
+        print(f"[PERF] Total request: {processing_time:.3f}s")
 
         return GenerateRepliesResponse(suggestions=suggestions)
 
