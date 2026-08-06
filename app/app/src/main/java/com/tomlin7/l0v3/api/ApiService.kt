@@ -82,10 +82,24 @@ class ApiService(private val serverUrl: String = "https://l0v3.onrender.com") {
     }
     
     private fun bitmapToBase64(bitmap: Bitmap): String {
+        // Scale down bitmap to max width 640px before compression to make upload instant (<60KB instead of 4MB)
+        val maxWidth = 640
+        val scaledBitmap = if (bitmap.width > maxWidth) {
+            val ratio = maxWidth.toFloat() / bitmap.width.toFloat()
+            val newHeight = (bitmap.height * ratio).toInt()
+            Bitmap.createScaledBitmap(bitmap, maxWidth, newHeight, true)
+        } else {
+            bitmap
+        }
+
         val outputStream = ByteArrayOutputStream()
-        // Compress to JPEG with 80% quality to reduce size
-        bitmap.compress(Bitmap.CompressFormat.JPEG, 80, outputStream)
+        scaledBitmap.compress(Bitmap.CompressFormat.JPEG, 70, outputStream)
         val byteArray = outputStream.toByteArray()
+
+        if (scaledBitmap != bitmap) {
+            scaledBitmap.recycle()
+        }
+
         return Base64.encodeToString(byteArray, Base64.NO_WRAP)
     }
 }
