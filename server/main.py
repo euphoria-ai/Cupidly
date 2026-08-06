@@ -172,8 +172,7 @@ async def generate_replies(request: GenerateRepliesRequest):
                     config=types.GenerateContentConfig(
                         response_mime_type="application/json",
                         response_schema=ReplySuggestions,
-                        thinking_config=types.ThinkingConfig(thinking_budget=0),
-                        max_output_tokens=150,
+                        max_output_tokens=200,
                         temperature=0.7,
                     )
                 )
