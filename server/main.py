@@ -29,12 +29,12 @@ async def get_client():
 app = FastAPI(
     title="L0V3",
     description="Backend service",
-    version="1.0.0"
+    version="1.1.0"
 )
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"], 
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -69,7 +69,7 @@ class ReplySuggestions(BaseModel):
     option_2: ReplyOption = Field(description="Second reply option")
     option_3: ReplyOption = Field(description="Third reply option")
 
-MODEL_NAME = "gemini-2.5-flash"
+MODEL_NAMES = ["gemini-2.5-flash", "gemini-1.5-flash"]
 
 # Pre-built prompt template for speed
 PROMPT_TEMPLATE = """You are an flirting assistant helping to generate flirty replies for chat conversations.
@@ -107,9 +107,9 @@ def build_prompt(preferences: UserPreferences) -> str:
         profile_parts.append(f"- Pronouns: {preferences.profile_pronouns}")
     if preferences.profile_bio:
         profile_parts.append(f"- About: {preferences.profile_bio}")
-    
+
     profile_info = "\n" + "\n".join(profile_parts) if profile_parts else ""
-    
+
     return PROMPT_TEMPLATE.format(
         style=preferences.style,
         tone=preferences.tone,
@@ -124,77 +124,98 @@ async def root():
     return {
         "status": "online",
         "service": "L0V3",
-        "version": "1.0.0"
+        "version": "1.1.0"
     }
 
 @app.post("/generate-replies", response_model=GenerateRepliesResponse)
 async def generate_replies(request: GenerateRepliesRequest):
     start_time = time.time()
-    
+
     try:
         try:
             image_data = base64.b64decode(request.screenshot_base64)
             image = Image.open(io.BytesIO(image_data))
-            
+
             if image.width > 1024:
                 ratio = 1024 / image.width
                 new_height = int(image.height * ratio)
                 image = image.resize((1024, new_height), Image.Resampling.LANCZOS)
-            
+
         except Exception as e:
             raise HTTPException(
                 status_code=400,
                 detail=f"Failed to decode screenshot: {str(e)}"
             )
-        
+
         prompt = build_prompt(request.preferences)
-        
-        try:
-            img_byte_arr = io.BytesIO()
-            image.save(img_byte_arr, format='JPEG', quality=85, optimize=True)
-            img_byte_arr = img_byte_arr.getvalue()
-            
-            contents = [
-                types.Part.from_bytes(data=img_byte_arr, mime_type="image/jpeg"),
-                types.Part.from_text(text=prompt)
-            ]
-            
-            client = await get_client()
-            async with client.aio as aclient:
-                response = await aclient.models.generate_content(
-                    model=MODEL_NAME,
-                    contents=contents,
-                    config={
-                        "response_mime_type": "application/json",
-                        "response_schema": ReplySuggestions,
-                    }
-                )
-            
-            if not response.parsed:
-                raise HTTPException(
-                    status_code=500,
-                    detail="Empty response from AI model"
-                )
-            
-            reply_suggestions: ReplySuggestions = response.parsed
-            suggestions = [
-                reply_suggestions.option_1.reply,
-                reply_suggestions.option_2.reply,
-                reply_suggestions.option_3.reply
-            ]
-            
-            # Log performance for monitoring
-            processing_time = time.time() - start_time
-            print(f"Request processed in {processing_time:.3f}s")
-            
-            return GenerateRepliesResponse(suggestions=suggestions)
-            
-        except Exception as e:
+
+        img_byte_arr = io.BytesIO()
+        image.save(img_byte_arr, format='JPEG', quality=85, optimize=True)
+        img_byte_arr = img_byte_arr.getvalue()
+
+        contents = [
+            types.Part.from_bytes(data=img_byte_arr, mime_type="image/jpeg"),
+            types.Part.from_text(text=prompt)
+        ]
+
+        client = await get_client()
+
+        suggestions = []
+        last_error = None
+
+        for model in MODEL_NAMES:
+            try:
+                async with client.aio as aclient:
+                    response = await aclient.models.generate_content(
+                        model=model,
+                        contents=contents,
+                        config=types.GenerateContentConfig(
+                            response_mime_type="application/json",
+                            response_schema=ReplySuggestions,
+                        )
+                    )
+
+                if response.parsed:
+                    reply_suggestions: ReplySuggestions = response.parsed
+                    suggestions = [
+                        reply_suggestions.option_1.reply,
+                        reply_suggestions.option_2.reply,
+                        reply_suggestions.option_3.reply
+                    ]
+                elif response.text:
+                    import json
+                    try:
+                        data = json.loads(response.text)
+                        if isinstance(data, dict):
+                            if "suggestions" in data:
+                                suggestions = data["suggestions"]
+                            elif "option_1" in data:
+                                suggestions = [
+                                    data["option_1"].get("reply", ""),
+                                    data["option_2"].get("reply", ""),
+                                    data["option_3"].get("reply", "")
+                                ]
+                    except Exception:
+                        pass
+
+                if suggestions and len(suggestions) >= 3:
+                    break
+            except Exception as e:
+                last_error = e
+                continue
+
+        if not suggestions or len(suggestions) < 3:
             raise HTTPException(
                 status_code=500,
-                detail=f"AI generation failed: {str(e)}"
+                detail=f"AI generation failed: {str(last_error) if last_error else 'No valid suggestions generated'}"
             )
-            
+
+        # Log performance for monitoring
+        processing_time = time.time() - start_time
+        print(f"Request processed in {processing_time:.3f}s")
+
+        return GenerateRepliesResponse(suggestions=suggestions)
+
     except HTTPException:
         raise
     except Exception as e:
@@ -208,13 +229,11 @@ if __name__ == "__main__":
     port = int(os.getenv("PORT", 8000))
     # Optimized uvicorn settings for speed
     uvicorn.run(
-        app, 
-        host="0.0.0.0", 
+        app,
+        host="0.0.0.0",
         port=port,
         workers=1,  # Single worker for this use case
         loop="asyncio",
         http="httptools",  # Faster HTTP parser
-        ws="websockets",
         log_level="warning"  # Reduce logging overhead
     )
-
