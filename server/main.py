@@ -69,7 +69,7 @@ class ReplySuggestions(BaseModel):
     option_2: ReplyOption = Field(description="Second reply option")
     option_3: ReplyOption = Field(description="Third reply option")
 
-MODEL_NAMES = ["gemini-3.5-flash-lite", "gemini-2.5-flash"]
+MODEL_NAMES = ["gemini-3.5-flash-lite", "gemini-1.5-flash"]
 
 # Pre-built prompt template for speed
 PROMPT_TEMPLATE = """You are an flirting assistant helping to generate flirty replies for chat conversations.
@@ -89,7 +89,7 @@ IMPORTANT INSTRUCTIONS:
 2. Flirt level: LESS means less flirty, MEDIUM means moderate flirty, BOLD means too much flirty
 3. Reply length: SHORT means very short (3-4 words), NORMAL means average message length, EXTENDED means 1-2 sentences
 4. Emoji use: NEVER means never use emojis, MINIMAL means some replies can have one emoji, EXPRESSIVE means most replies can have emojis
-5. Generate EXACTLY 3 distinct reply options
+5. Return JSON format strictly like: {"suggestions": ["reply 1", "reply 2", "reply 3"]}
 6. Make each reply unique
 7. Match the conversation context and tone
 8. Keep replies natural and short
@@ -136,10 +136,11 @@ async def generate_replies(request: GenerateRepliesRequest):
             image_data = base64.b64decode(request.screenshot_base64)
             image = Image.open(io.BytesIO(image_data))
 
-            if image.width > 1024:
-                ratio = 1024 / image.width
+            # Optimize resizing: 640px width max using BILINEAR for speed on Render CPU
+            if image.width > 640:
+                ratio = 640 / image.width
                 new_height = int(image.height * ratio)
-                image = image.resize((1024, new_height), Image.Resampling.LANCZOS)
+                image = image.resize((640, new_height), Image.Resampling.BILINEAR)
 
         except Exception as e:
             raise HTTPException(
@@ -150,7 +151,7 @@ async def generate_replies(request: GenerateRepliesRequest):
         prompt = build_prompt(request.preferences)
 
         img_byte_arr = io.BytesIO()
-        image.save(img_byte_arr, format='JPEG', quality=85, optimize=True)
+        image.save(img_byte_arr, format='JPEG', quality=70)
         img_byte_arr = img_byte_arr.getvalue()
 
         contents = [
@@ -171,30 +172,24 @@ async def generate_replies(request: GenerateRepliesRequest):
                         contents=contents,
                         config=types.GenerateContentConfig(
                             response_mime_type="application/json",
-                            response_schema=ReplySuggestions,
+                            temperature=0.7,
                         )
                     )
 
-                if response.parsed:
-                    reply_suggestions: ReplySuggestions = response.parsed
-                    suggestions = [
-                        reply_suggestions.option_1.reply,
-                        reply_suggestions.option_2.reply,
-                        reply_suggestions.option_3.reply
-                    ]
-                elif response.text:
+                if response.text:
                     import json
                     try:
                         data = json.loads(response.text)
                         if isinstance(data, dict):
-                            if "suggestions" in data:
+                            if "suggestions" in data and isinstance(data["suggestions"], list):
                                 suggestions = data["suggestions"]
                             elif "option_1" in data:
-                                suggestions = [
-                                    data["option_1"].get("reply", ""),
-                                    data["option_2"].get("reply", ""),
-                                    data["option_3"].get("reply", "")
-                                ]
+                                o1 = data["option_1"].get("reply", "") if isinstance(data["option_1"], dict) else str(data["option_1"])
+                                o2 = data["option_2"].get("reply", "") if isinstance(data["option_2"], dict) else str(data["option_2"])
+                                o3 = data["option_3"].get("reply", "") if isinstance(data["option_3"], dict) else str(data["option_3"])
+                                suggestions = [o1, o2, o3]
+                        elif isinstance(data, list):
+                            suggestions = [str(x) for x in data]
                     except Exception:
                         pass
 
