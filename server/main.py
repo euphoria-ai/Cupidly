@@ -17,13 +17,10 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 if not GEMINI_API_KEY:
     raise ValueError("GEMINI_API_KEY environment variable is required")
 
-# Global client for connection reuse
-_client = None
+# Initialize global client
+_client = genai.Client(api_key=GEMINI_API_KEY)
 
-async def get_client():
-    global _client
-    if _client is None:
-        _client = genai.Client(api_key=GEMINI_API_KEY)
+def get_client():
     return _client
 
 app = FastAPI(
@@ -159,22 +156,21 @@ async def generate_replies(request: GenerateRepliesRequest):
             types.Part.from_text(text=prompt)
         ]
 
-        client = await get_client()
+        client = get_client()
 
         suggestions = []
         last_error = None
 
         for model in MODEL_NAMES:
             try:
-                async with client.aio as aclient:
-                    response = await aclient.models.generate_content(
-                        model=model,
-                        contents=contents,
-                        config=types.GenerateContentConfig(
-                            response_mime_type="application/json",
-                            response_schema=ReplySuggestions,
-                        )
+                response = await client.aio.models.generate_content(
+                    model=model,
+                    contents=contents,
+                    config=types.GenerateContentConfig(
+                        response_mime_type="application/json",
+                        response_schema=ReplySuggestions,
                     )
+                )
 
                 if response.parsed:
                     reply_suggestions: ReplySuggestions = response.parsed
