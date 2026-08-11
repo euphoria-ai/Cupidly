@@ -23,6 +23,7 @@ import com.tomfricks.cupidly.api.ApiService
 import com.tomfricks.cupidly.keyboard.ConversationSession
 import com.tomfricks.cupidly.data.PreferencesRepository
 import com.tomfricks.cupidly.data.UserPreferences
+import com.tomfricks.cupidly.keyboard.RizzSession
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.first
 import java.io.File
@@ -151,13 +152,16 @@ class ScreenshotDetectionService : Service() {
                                     // Load and process screenshot
                                     val bitmap = loadScreenshot(path)
                                     if (bitmap != null) {
+                                        // Record the round centrally first, so it
+                                        // survives with or without a live keyboard.
                                         withContext(Dispatchers.Main) {
+                                            RizzSession.onScreenshot(bitmap)
                                             onScreenshotDetected?.invoke(bitmap)
                                         }
-                                        
+
                                         // Automatically generate replies
                                         generateAutoReplies(bitmap)
-                                        
+
                                         Log.d("ScreenshotDetection", "Screenshot detected and processed: $path")
                                     }
                                 }
@@ -223,7 +227,7 @@ class ScreenshotDetectionService : Service() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(
                 CHANNEL_ID,
-                "Cupidly Screenshot Detection",
+                "Hook Screenshot Detection",
                 NotificationManager.IMPORTANCE_LOW
             ).apply {
                 description = "Detects screenshots for AI reply generation"
@@ -250,19 +254,24 @@ class ScreenshotDetectionService : Service() {
                     // shows the fresh suggestions.
                     ConversationSession.update(generated.context)
                     withContext(Dispatchers.Main) {
+                        RizzSession.onSuggestions(generated.suggestions)
                         onAutoReplyGenerated?.invoke(generated.suggestions)
                     }
                     Log.d("ScreenshotDetection", "Auto-generated ${generated.suggestions.size} replies")
                 }.onFailure { error ->
                     Log.e("ScreenshotDetection", "Error generating auto replies", error)
                     withContext(Dispatchers.Main) {
-                        onAutoReplyFailed?.invoke(error.message ?: "Couldn't reach Cupidly")
+                        val reason = error.message ?: "Couldn't reach Hook"
+                        RizzSession.onFailure(reason)
+                        onAutoReplyFailed?.invoke(reason)
                     }
                 }
             } catch (e: Exception) {
                 Log.e("ScreenshotDetection", "Error generating auto replies", e)
                 withContext(Dispatchers.Main) {
-                    onAutoReplyFailed?.invoke(e.message ?: "Couldn't reach Cupidly")
+                    val reason = e.message ?: "Couldn't reach Hook"
+                    RizzSession.onFailure(reason)
+                    onAutoReplyFailed?.invoke(reason)
                 }
             }
         }
@@ -270,7 +279,7 @@ class ScreenshotDetectionService : Service() {
     
     private fun createNotification(): Notification {
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("Cupidly is active")
+            .setContentTitle("Hook is active")
             .setContentText("Take a screenshot for automatic AI replies")
             .setSmallIcon(android.R.drawable.ic_dialog_info)
             .setPriority(NotificationCompat.PRIORITY_LOW)

@@ -84,7 +84,7 @@ fun GuideScreen(
                     id = if (isDarkTheme) R.drawable.heart_transparent
                     else R.drawable.heart_transparent_light
                 ),
-                contentDescription = "Cupidly",
+                contentDescription = "Hook",
                 modifier = Modifier.size(100.dp),
             )
 
@@ -112,7 +112,7 @@ fun GuideScreen(
             // Steps
             val steps = listOf(
                 "Open your messaging app",
-                "Switch to the Cupidly keyboard",
+                "Switch to the Hook keyboard",
                 "Take a screenshot of the chat",
                 "Tap a reply to send it",
                 "Keep the chat going — generate more rizz!"
