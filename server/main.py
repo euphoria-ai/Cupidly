@@ -93,9 +93,15 @@ RESPONSE_FORMAT = {
 
 
 # --- Model Config ---
-# llama-4-scout on Groq LPUs: vision-capable, ~10x the tok/s of GPU inference.
-MODEL = os.getenv("GROQ_MODEL", "meta-llama/llama-4-scout-17b-16e-instruct")
-FALLBACK_MODEL = os.getenv("GROQ_FALLBACK_MODEL", "meta-llama/llama-4-maverick-17b-128e-instruct")
+# qwen3.6-27b is currently the only vision-capable model Groq serves us; the
+# llama-4 scout/maverick pair it replaced now returns model_not_found.
+MODEL = os.getenv("GROQ_MODEL", "qwen/qwen3.6-27b")
+FALLBACK_MODEL = os.getenv("GROQ_FALLBACK_MODEL", "qwen/qwen3.6-27b")
+
+# It is a reasoning model: left to itself it emits a <think> block before the
+# answer, which makes both JSON modes fail outright. "none" turns that off.
+# Groq only accepts "none" or "default" here.
+REASONING_EFFORT = os.getenv("GROQ_REASONING_EFFORT", "none")
 
 # Compact prompt — fewer input tokens = faster processing.
 # "JSON" must appear literally for Groq's json_object fallback mode.
@@ -109,6 +115,21 @@ Rules:
 - LESS/MEDIUM/BOLD controls flirt intensity
 
 Reply with JSON only: {{"suggestion_1": "...", "suggestion_2": "...", "suggestion_3": "..."}}"""
+
+def strip_reasoning(text: str) -> str:
+    """Drop any <think> block and code fences a reasoning model may still emit."""
+    if "</think>" in text:
+        text = text.split("</think>", 1)[1]
+    text = text.strip()
+    if text.startswith("```"):
+        text = text.split("\n", 1)[-1]
+        if "```" in text:
+            text = text.rsplit("```", 1)[0]
+    # Fall back to the outermost JSON object if prose crept in around it.
+    if not text.lstrip().startswith("{") and "{" in text and "}" in text:
+        text = text[text.index("{"):text.rindex("}") + 1]
+    return text.strip()
+
 
 def build_prompt(p: UserPreferences) -> str:
     parts = []
@@ -164,18 +185,22 @@ async def generate_replies(request: GenerateRepliesRequest):
         for model, response_format in attempts:
             try:
                 groq_start = time.time()
+                kwargs = {}
+                if REASONING_EFFORT:
+                    kwargs["reasoning_effort"] = REASONING_EFFORT
                 response = await _client.chat.completions.create(
                     model=model,
                     messages=messages,
                     response_format=response_format,
-                    max_tokens=200,
+                    max_tokens=400,
                     temperature=0.7,
+                    **kwargs,
                 )
                 groq_time = time.time() - groq_start
 
                 text = response.choices[0].message.content
                 if text:
-                    data = json.loads(text)
+                    data = json.loads(strip_reasoning(text))
                     suggestions = [
                         data.get("suggestion_1", ""),
                         data.get("suggestion_2", ""),
