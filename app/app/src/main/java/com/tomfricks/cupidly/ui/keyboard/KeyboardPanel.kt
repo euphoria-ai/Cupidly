@@ -36,7 +36,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.tomfricks.cupidly.R
-import com.tomfricks.cupidly.keyboard.CupidlyKeyboardService.KeyboardState
+import com.tomfricks.cupidly.keyboard.RizzSession
 import com.tomfricks.cupidly.ui.theme.IncomingBubble
 import com.tomfricks.cupidly.ui.theme.PebbleActionPill
 import com.tomfricks.cupidly.ui.theme.PebbleBubble
@@ -66,7 +66,7 @@ private val PanelHeight = 300.dp
  */
 @Composable
 fun KeyboardPanel(
-    state: KeyboardState,
+    state: RizzSession.Status,
     messages: List<KeyboardMessage>,
     errorMessage: String?,
     isDarkTheme: Boolean,
@@ -95,13 +95,13 @@ fun KeyboardPanel(
                 EmptyState(
                     isDarkTheme = isDarkTheme,
                     title = when (state) {
-                        KeyboardState.ERROR -> "Couldn't read that one"
-                        KeyboardState.GENERATING, KeyboardState.COOKING -> "Cooking rizz…"
+                        RizzSession.Status.ERROR -> "Couldn't read that one"
+                        RizzSession.Status.GENERATING -> "Cooking rizz…"
                         else -> "Take a screenshot"
                     },
                     body = when (state) {
-                        KeyboardState.ERROR -> errorMessage ?: "Something went wrong"
-                        KeyboardState.GENERATING, KeyboardState.COOKING ->
+                        RizzSession.Status.ERROR -> errorMessage ?: "Something went wrong"
+                        RizzSession.Status.GENERATING ->
                             "Reading the chat and writing your replies"
 
                         else -> "So Cupidly knows what's on your screen"
@@ -236,7 +236,7 @@ private fun ChatTranscript(
 
 @Composable
 private fun KeyboardBottomBar(
-    state: KeyboardState,
+    state: RizzSession.Status,
     hasMessages: Boolean,
     onGenerate: () -> Unit,
     onPlusClick: () -> Unit,
@@ -255,7 +255,7 @@ private fun KeyboardBottomBar(
 
         PebbleActionPill(
             text = when {
-                state == KeyboardState.GENERATING || state == KeyboardState.COOKING ->
+                state == RizzSession.Status.GENERATING ->
                     "Cooking rizz…"
 
                 hasMessages -> "Generate more rizz"

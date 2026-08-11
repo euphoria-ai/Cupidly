@@ -22,6 +22,7 @@ import androidx.core.app.NotificationCompat
 import com.tomfricks.cupidly.api.ApiService
 import com.tomfricks.cupidly.data.PreferencesRepository
 import com.tomfricks.cupidly.data.UserPreferences
+import com.tomfricks.cupidly.keyboard.RizzSession
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.first
 import java.io.File
@@ -150,13 +151,16 @@ class ScreenshotDetectionService : Service() {
                                     // Load and process screenshot
                                     val bitmap = loadScreenshot(path)
                                     if (bitmap != null) {
+                                        // Record the round centrally first, so it
+                                        // survives with or without a live keyboard.
                                         withContext(Dispatchers.Main) {
+                                            RizzSession.onScreenshot(bitmap)
                                             onScreenshotDetected?.invoke(bitmap)
                                         }
-                                        
+
                                         // Automatically generate replies
                                         generateAutoReplies(bitmap)
-                                        
+
                                         Log.d("ScreenshotDetection", "Screenshot detected and processed: $path")
                                     }
                                 }
@@ -242,19 +246,24 @@ class ScreenshotDetectionService : Service() {
                 
                 result.onSuccess { replies ->
                     withContext(Dispatchers.Main) {
+                        RizzSession.onSuggestions(replies)
                         onAutoReplyGenerated?.invoke(replies)
                     }
                     Log.d("ScreenshotDetection", "Auto-generated ${replies.size} replies")
                 }.onFailure { error ->
                     Log.e("ScreenshotDetection", "Error generating auto replies", error)
                     withContext(Dispatchers.Main) {
-                        onAutoReplyFailed?.invoke(error.message ?: "Couldn't reach Cupidly")
+                        val reason = error.message ?: "Couldn't reach Cupidly"
+                        RizzSession.onFailure(reason)
+                        onAutoReplyFailed?.invoke(reason)
                     }
                 }
             } catch (e: Exception) {
                 Log.e("ScreenshotDetection", "Error generating auto replies", e)
                 withContext(Dispatchers.Main) {
-                    onAutoReplyFailed?.invoke(e.message ?: "Couldn't reach Cupidly")
+                    val reason = e.message ?: "Couldn't reach Cupidly"
+                    RizzSession.onFailure(reason)
+                    onAutoReplyFailed?.invoke(reason)
                 }
             }
         }
