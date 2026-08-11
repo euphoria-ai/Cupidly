@@ -20,6 +20,7 @@ import android.provider.MediaStore
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import com.tomfricks.cupidly.api.ApiService
+import com.tomfricks.cupidly.keyboard.ConversationSession
 import com.tomfricks.cupidly.data.PreferencesRepository
 import com.tomfricks.cupidly.data.UserPreferences
 import kotlinx.coroutines.*
@@ -237,14 +238,21 @@ class ScreenshotDetectionService : Service() {
         serviceScope.launch(Dispatchers.IO) {
             try {
                 val prefs = preferencesRepository.userPreferencesFlow.first()
-                
-                val result = apiService.generateReplies(bitmap, prefs)
-                
-                result.onSuccess { replies ->
+
+                // Carry the hidden session context into the request; it keeps
+                // building even across screenshots where no reply was picked.
+                val currentContext = ConversationSession.conversationContext
+
+                val result = apiService.generateReplies(bitmap, prefs, currentContext)
+
+                result.onSuccess { generated ->
+                    // Persist the updated context (in memory only) before the UI
+                    // shows the fresh suggestions.
+                    ConversationSession.update(generated.context)
                     withContext(Dispatchers.Main) {
-                        onAutoReplyGenerated?.invoke(replies)
+                        onAutoReplyGenerated?.invoke(generated.suggestions)
                     }
-                    Log.d("ScreenshotDetection", "Auto-generated ${replies.size} replies")
+                    Log.d("ScreenshotDetection", "Auto-generated ${generated.suggestions.size} replies")
                 }.onFailure { error ->
                     Log.e("ScreenshotDetection", "Error generating auto replies", error)
                     withContext(Dispatchers.Main) {

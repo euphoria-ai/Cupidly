@@ -22,6 +22,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Backspace
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Create
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -73,6 +74,7 @@ fun KeyboardPanel(
     onGenerate: () -> Unit,
     onSuggestionClick: (String) -> Unit,
     onPlusClick: () -> Unit,
+    onNewChatClick: () -> Unit,
     onBackspaceClick: () -> Unit,
     modifier: Modifier = Modifier,
     thumbnail: (@Composable () -> Unit)? = null
@@ -124,6 +126,7 @@ fun KeyboardPanel(
             hasMessages = messages.isNotEmpty(),
             onGenerate = onGenerate,
             onPlusClick = onPlusClick,
+            onNewChatClick = onNewChatClick,
             onBackspaceClick = onBackspaceClick
         )
     }
@@ -240,6 +243,7 @@ private fun KeyboardBottomBar(
     hasMessages: Boolean,
     onGenerate: () -> Unit,
     onPlusClick: () -> Unit,
+    onNewChatClick: () -> Unit,
     onBackspaceClick: () -> Unit
 ) {
     Row(
@@ -251,6 +255,13 @@ private fun KeyboardBottomBar(
             icon = Icons.Default.Add,
             contentDescription = "Cupidly settings",
             onClick = onPlusClick
+        )
+
+        // Start a fresh conversation — clears the hidden session context.
+        PebbleIconButton(
+            icon = Icons.Default.Create,
+            contentDescription = "New chat",
+            onClick = onNewChatClick
         )
 
         PebbleActionPill(

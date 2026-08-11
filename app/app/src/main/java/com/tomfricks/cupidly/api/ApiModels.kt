@@ -6,7 +6,20 @@ data class GenerateRepliesRequest(
     @SerializedName("screenshot_base64")
     val screenshotBase64: String,
     @SerializedName("preferences")
-    val preferences: PreferencesDto
+    val preferences: PreferencesDto,
+    @SerializedName("context")
+    val context: ConversationContext? = null
+)
+
+/**
+ * Hidden, session-only understanding of the whole conversation. Never shown in
+ * any UI surface and never persisted to disk. Field names mirror the server.
+ */
+data class ConversationContext(
+    @SerializedName("summary")
+    val summary: String = "",
+    @SerializedName("sent_replies")
+    val sentReplies: List<String> = emptyList()
 )
 
 data class PreferencesDto(
@@ -32,7 +45,9 @@ data class PreferencesDto(
 
 data class GenerateRepliesResponse(
     @SerializedName("suggestions")
-    val suggestions: List<String>
+    val suggestions: List<String>,
+    @SerializedName("context")
+    val context: ConversationContext = ConversationContext()
 )
 
 data class ErrorResponse(

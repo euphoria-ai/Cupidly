@@ -56,12 +56,23 @@ class UserPreferences(BaseModel):
     profile_pronouns: Optional[str] = "he/him"
     profile_bio: Optional[str] = ""
 
+class ConversationContext(BaseModel):
+    """Session-only, hidden understanding of the whole conversation.
+
+    Held by the client between screenshots; the server stays stateless and only
+    reads the incoming context and returns an updated one.
+    """
+    summary: str = ""          # rolling, concise understanding of the chat so far
+    sent_replies: List[str] = []  # replies the user actually picked & sent (client-managed)
+
 class GenerateRepliesRequest(BaseModel):
     screenshot_base64: str
     preferences: UserPreferences
+    context: Optional[ConversationContext] = None
 
 class GenerateRepliesResponse(BaseModel):
     suggestions: List[str]
+    context: ConversationContext
 
 
 # --- Structured Output Schema for Groq ---
@@ -84,8 +95,12 @@ RESPONSE_FORMAT = {
                 "suggestion_1": {"type": "string"},
                 "suggestion_2": {"type": "string"},
                 "suggestion_3": {"type": "string"},
+                "updated_context_summary": {"type": "string"},
             },
-            "required": ["suggestion_1", "suggestion_2", "suggestion_3"],
+            "required": [
+                "suggestion_1", "suggestion_2", "suggestion_3",
+                "updated_context_summary",
+            ],
             "additionalProperties": False,
         },
     },
@@ -106,15 +121,16 @@ REASONING_EFFORT = os.getenv("GROQ_REASONING_EFFORT", "none")
 # Compact prompt — fewer input tokens = faster processing.
 # "JSON" must appear literally for Groq's json_object fallback mode.
 PROMPT_TEMPLATE = """Look at this chat screenshot. Generate 3 flirty reply suggestions.
-
+{context_block}
 Preferences: style={style}, tone={tone}, flirt={flirt_level}, length={reply_length}, emoji={emoji_use}{profile_info}
 
 Rules:
 - SHORT=3-4 words, NORMAL=1 sentence, EXTENDED=1-2 sentences
 - NEVER/MINIMAL/EXPRESSIVE controls emoji usage
 - LESS/MEDIUM/BOLD controls flirt intensity
+- updated_context_summary: rewrite the running conversation summary by folding in this newest screenshot without losing earlier facts (who the match is, tone, key topics/facts); keep it concise, a few sentences, max ~150 words
 
-Reply with JSON only: {{"suggestion_1": "...", "suggestion_2": "...", "suggestion_3": "..."}}"""
+Reply with JSON only: {{"suggestion_1": "...", "suggestion_2": "...", "suggestion_3": "...", "updated_context_summary": "..."}}"""
 
 def strip_reasoning(text: str) -> str:
     """Drop any <think> block and code fences a reasoning model may still emit."""
@@ -131,12 +147,33 @@ def strip_reasoning(text: str) -> str:
     return text.strip()
 
 
-def build_prompt(p: UserPreferences) -> str:
+def build_context_block(context: Optional[ConversationContext]) -> str:
+    """Render the prior context so the model can carry the conversation forward.
+
+    Empty when there is nothing yet, so the first request is unchanged.
+    """
+    if context is None:
+        return ""
+    summary = (context.summary or "").strip()
+    sent = [r for r in (context.sent_replies or []) if r and r.strip()]
+    if not summary and not sent:
+        return ""
+    lines = ["\nConversation so far (context only — do not repeat verbatim):"]
+    if summary:
+        lines.append(f"Summary: {summary}")
+    if sent:
+        joined = "\n".join(f"- {r}" for r in sent)
+        lines.append("Replies the user has already sent in this conversation:\n" + joined)
+    return "\n".join(lines) + "\n"
+
+
+def build_prompt(p: UserPreferences, context: Optional[ConversationContext] = None) -> str:
     parts = []
     if p.profile_name: parts.append(f", name={p.profile_name}")
     if p.profile_gender: parts.append(f", gender={p.profile_gender}")
     profile_info = "".join(parts)
     return PROMPT_TEMPLATE.format(
+        context_block=build_context_block(context),
         style=p.style, tone=p.tone, flirt_level=p.flirt_level,
         reply_length=p.reply_length, emoji_use=p.emoji_use, profile_info=profile_info
     )
@@ -158,7 +195,7 @@ async def generate_replies(request: GenerateRepliesRequest):
         b64 = request.screenshot_base64
         if b64.startswith("data:"):
             b64 = b64.split(",", 1)[-1]
-        prompt = build_prompt(request.preferences)
+        prompt = build_prompt(request.preferences, request.context)
 
         messages = [{
             "role": "user",
@@ -172,6 +209,7 @@ async def generate_replies(request: GenerateRepliesRequest):
         }]
 
         suggestions = []
+        updated_summary = ""
         last_error = None
 
         # (model, response_format) attempts. json_schema is strict but only some
@@ -192,13 +230,15 @@ async def generate_replies(request: GenerateRepliesRequest):
                     model=model,
                     messages=messages,
                     response_format=response_format,
-                    max_tokens=400,
+                    # Room for 3 replies plus the ~150-word rolling summary.
+                    max_tokens=600,
                     temperature=0.7,
                     **kwargs,
                 )
                 groq_time = time.time() - groq_start
 
                 text = response.choices[0].message.content
+                candidate_summary = ""
                 if text:
                     data = json.loads(strip_reasoning(text))
                     suggestions = [
@@ -206,8 +246,13 @@ async def generate_replies(request: GenerateRepliesRequest):
                         data.get("suggestion_2", ""),
                         data.get("suggestion_3", ""),
                     ]
+                    # Present in the json_schema branch and, when the model
+                    # cooperates, in the json_object fallback too.
+                    raw_summary = data.get("updated_context_summary", "")
+                    candidate_summary = strip_reasoning(raw_summary) if raw_summary else ""
 
                 if suggestions and len(suggestions) >= 3 and all(suggestions):
+                    updated_summary = candidate_summary
                     total = time.time() - start_time
                     print(f"[PERF] {model}: groq={groq_time:.2f}s total={total:.2f}s")
                     break
@@ -224,7 +269,16 @@ async def generate_replies(request: GenerateRepliesRequest):
                 detail=f"AI generation failed: {str(last_error) if last_error else 'No valid suggestions'}"
             )
 
-        return GenerateRepliesResponse(suggestions=suggestions[:3])
+        # Client holds the context; we pass its sent_replies through unchanged
+        # and hand back either the freshly updated summary or the prior one.
+        prior_summary = request.context.summary if request.context else ""
+        passthrough_sent = request.context.sent_replies if request.context else []
+        result_context = ConversationContext(
+            summary=updated_summary or prior_summary,
+            sent_replies=passthrough_sent,
+        )
+
+        return GenerateRepliesResponse(suggestions=suggestions[:3], context=result_context)
 
     except HTTPException:
         raise
