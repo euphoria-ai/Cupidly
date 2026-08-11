@@ -12,7 +12,7 @@
     <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
     
     <application
-        android:name=".L0V3Application"
+        android:name=".CupidlyApplication"
         android:allowBackup="true"
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:fullBackupContent="@xml/backup_rules"
@@ -20,23 +20,24 @@
         android:label="@string/app_name"
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
-        android:theme="@style/Theme.L0V3"
+        android:theme="@style/Theme.Cupidly"
         tools:targetApi="31">
         
         <!-- Main Activity -->
         <activity
             android:name=".MainActivity"
             android:exported="true"
-            android:theme="@style/Theme.L0V3">
+            android:theme="@style/Theme.Cupidly"
+            android:windowSoftInputMode="adjustResize">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
 
-        <!-- L0V3 Keyboard Service -->
+        <!-- Cupidly Keyboard Service -->
         <service
-            android:name=".keyboard.L0V3KeyboardService"
+            android:name=".keyboard.CupidlyKeyboardService"
             android:exported="true"
             android:label="@string/keyboard_name"
             android:permission="android.permission.BIND_INPUT_METHOD">

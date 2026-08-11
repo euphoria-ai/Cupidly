@@ -1,6 +1,7 @@
 fastapi
 uvicorn[standard]
-google-genai[aiohttp]
+openai
+httpx
 pillow
 python-dotenv
 pydantic

@@ -1,0 +1,384 @@
+package com.tomlin7.cupidly.ui.theme
+
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.dp
+
+/**
+ * Pebble design system.
+ *
+ * Every tappable surface in the app (and in the keyboard) is a "pebble": a
+ * rounded slab filled with a vertical gradient, wrapped in a coloured glow,
+ * that springs inward when pressed. [PebbleTone] picks which gradient is used.
+ */
+enum class PebbleTone {
+    /** Bright dark-blue — primary actions and reply suggestions. */
+    BLUE,
+
+    /** Near-black slate — the "Generate rizz" style command pill. */
+    SLATE,
+
+    /** Muted surface tint — settings rows, tips, secondary chrome. */
+    MUTED,
+
+    /** Destructive red. */
+    DANGER
+}
+
+/** True when the active color scheme is a dark one. */
+val isPebbleDark: Boolean
+    @Composable get() = MaterialTheme.colorScheme.background.luminance() < 0.5f
+
+private class PebbleColors(
+    val gradient: List<Color>,
+    val glow: Color,
+    val content: Color,
+    val rim: Color
+)
+
+@Composable
+private fun pebbleColors(tone: PebbleTone): PebbleColors {
+    val dark = isPebbleDark
+    return when (tone) {
+        PebbleTone.BLUE -> PebbleColors(
+            gradient = if (dark) {
+                listOf(PebbleBlueLight, PebbleBlue, PebbleBlueDeep)
+            } else {
+                listOf(BubbleOutgoingTop, PebbleBlue, BubbleOutgoingBottom)
+            },
+            glow = PebbleBlue,
+            content = Color.White,
+            rim = Color.White.copy(alpha = if (dark) 0.18f else 0.28f)
+        )
+
+        PebbleTone.SLATE -> PebbleColors(
+            gradient = if (dark) {
+                listOf(Color(0xFF2A3346), PebbleSlate, Color(0xFF10141F))
+            } else {
+                listOf(Color(0xFF39425A), PebbleSlate, Color(0xFF10141F))
+            },
+            glow = PebbleBlueInk,
+            content = Color.White,
+            rim = Color.White.copy(alpha = 0.14f)
+        )
+
+        PebbleTone.MUTED -> PebbleColors(
+            gradient = if (dark) {
+                listOf(Color(0xFF1B2233), DarkSurfaceVariant, Color(0xFF111725))
+            } else {
+                listOf(Color(0xFFFFFFFF), PebbleSlateLight, Color(0xFFDCE3F0))
+            },
+            glow = if (dark) Color.Black else PebbleBlueDeep,
+            content = MaterialTheme.colorScheme.onSurface,
+            rim = if (dark) Color.White.copy(alpha = 0.06f) else Color.White.copy(alpha = 0.7f)
+        )
+
+        PebbleTone.DANGER -> PebbleColors(
+            gradient = listOf(Color(0xFFFF6B6E), Error, Color(0xFFB3363A)),
+            glow = Error,
+            content = Color.White,
+            rim = Color.White.copy(alpha = 0.22f)
+        )
+    }
+}
+
+/**
+ * The raw pebble slab. Handles the gradient fill, rim highlight, glow shadow
+ * and press spring; callers supply the content.
+ */
+@Composable
+fun PebbleSurface(
+    onClick: (() -> Unit)?,
+    modifier: Modifier = Modifier,
+    tone: PebbleTone = PebbleTone.BLUE,
+    cornerRadius: Dp = 22.dp,
+    elevation: Dp = 6.dp,
+    contentAlignment: Alignment = Alignment.Center,
+    content: @Composable BoxScope.() -> Unit
+) {
+    val interactionSource = remember { MutableInteractionSource() }
+    val isPressed by interactionSource.collectIsPressedAsState()
+    val colors = pebbleColors(tone)
+
+    val scale by animateFloatAsState(
+        targetValue = if (isPressed) 0.96f else 1f,
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioMediumBouncy,
+            stiffness = Spring.StiffnessLow
+        ),
+        label = "pebble_scale"
+    )
+    val glowAlpha by animateFloatAsState(
+        targetValue = if (isPressed) 0.55f else 0.3f,
+        animationSpec = tween(150),
+        label = "pebble_glow"
+    )
+
+    val shape = RoundedCornerShape(cornerRadius)
+
+    Box(
+        modifier = modifier
+            .graphicsLayer {
+                scaleX = scale
+                scaleY = scale
+            }
+            .shadow(
+                elevation = if (isPressed) elevation + 4.dp else elevation,
+                shape = shape,
+                ambientColor = colors.glow.copy(alpha = glowAlpha * 0.5f),
+                spotColor = colors.glow.copy(alpha = glowAlpha),
+                clip = false
+            )
+            .background(brush = Brush.verticalGradient(colors.gradient), shape = shape)
+            .background(
+                brush = Brush.verticalGradient(
+                    colors = listOf(colors.rim, Color.Transparent),
+                    endY = 40f
+                ),
+                shape = shape
+            )
+            .border(width = 1.dp, color = colors.rim, shape = shape)
+            .then(
+                if (onClick != null) {
+                    Modifier.clickable(
+                        interactionSource = interactionSource,
+                        indication = null,
+                        onClick = onClick
+                    )
+                } else {
+                    Modifier
+                }
+            ),
+        contentAlignment = contentAlignment,
+        content = content
+    )
+}
+
+/** Full-width primary pebble button. */
+@Composable
+fun PebbleButton(
+    text: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    tone: PebbleTone = PebbleTone.BLUE,
+    fillWidth: Boolean = true
+) {
+    val contentColor = if (tone == PebbleTone.MUTED) {
+        MaterialTheme.colorScheme.onSurface
+    } else {
+        Color.White
+    }
+    PebbleSurface(
+        onClick = onClick,
+        modifier = if (fillWidth) modifier.fillMaxWidth() else modifier,
+        tone = tone
+    ) {
+        Text(
+            text = text,
+            modifier = Modifier.padding(horizontal = 28.dp, vertical = 16.dp),
+            style = MaterialTheme.typography.titleMedium,
+            color = contentColor,
+            fontWeight = FontWeight.SemiBold,
+            textAlign = TextAlign.Center
+        )
+    }
+}
+
+/** The dark command pill, e.g. "Generate rizz". */
+@Composable
+fun PebbleActionPill(
+    text: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    PebbleSurface(
+        onClick = onClick,
+        modifier = modifier,
+        tone = PebbleTone.SLATE,
+        cornerRadius = 18.dp,
+        elevation = 4.dp
+    ) {
+        Text(
+            text = text,
+            modifier = Modifier.padding(horizontal = 24.dp, vertical = 14.dp),
+            style = MaterialTheme.typography.titleMedium,
+            color = Color.White,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 1
+        )
+    }
+}
+
+/** Square pebble holding a single icon — keyboard chrome, nav affordances. */
+@Composable
+fun PebbleIconButton(
+    icon: ImageVector,
+    contentDescription: String?,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    tone: PebbleTone = PebbleTone.MUTED,
+    buttonSize: Dp = 46.dp
+) {
+    val tint = if (tone == PebbleTone.MUTED) {
+        MaterialTheme.colorScheme.onSurface
+    } else {
+        Color.White
+    }
+    PebbleSurface(
+        onClick = onClick,
+        modifier = modifier.size(buttonSize),
+        tone = tone,
+        cornerRadius = 14.dp,
+        elevation = 3.dp
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = contentDescription,
+            tint = tint,
+            modifier = Modifier.size(22.dp)
+        )
+    }
+}
+
+/**
+ * A blue outgoing chat bubble — used for reply suggestions in the keyboard and
+ * in the demo transcript.
+ */
+@Composable
+fun PebbleBubble(
+    text: String,
+    onClick: (() -> Unit)?,
+    modifier: Modifier = Modifier
+) {
+    PebbleSurface(
+        onClick = onClick,
+        modifier = modifier,
+        tone = PebbleTone.BLUE,
+        cornerRadius = 20.dp,
+        elevation = 5.dp,
+        contentAlignment = Alignment.CenterStart
+    ) {
+        Text(
+            text = text,
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 11.dp),
+            style = MaterialTheme.typography.bodyMedium,
+            color = Color.White,
+            fontWeight = FontWeight.Medium
+        )
+    }
+}
+
+/** A grey incoming bubble, for demo transcripts. */
+@Composable
+fun IncomingBubble(
+    text: String,
+    modifier: Modifier = Modifier
+) {
+    val dark = isPebbleDark
+    Box(
+        modifier = modifier
+            .background(
+                color = if (dark) BubbleIncomingDark else BubbleIncomingLight,
+                shape = RoundedCornerShape(20.dp)
+            )
+    ) {
+        Text(
+            text = text,
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 11.dp),
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurface
+        )
+    }
+}
+
+/** Title + subtitle settings row, rendered as a muted pebble. */
+@Composable
+fun PebbleRow(
+    title: String,
+    subtitle: String? = null,
+    onClick: (() -> Unit)? = null,
+    modifier: Modifier = Modifier,
+    tone: PebbleTone = PebbleTone.MUTED,
+    trailingIcon: ImageVector? = null,
+    leading: (@Composable () -> Unit)? = null
+) {
+    val contentColor = if (tone == PebbleTone.MUTED) {
+        MaterialTheme.colorScheme.onSurface
+    } else {
+        Color.White
+    }
+    PebbleSurface(
+        onClick = onClick,
+        modifier = modifier.fillMaxWidth(),
+        tone = tone,
+        cornerRadius = 18.dp,
+        elevation = 3.dp,
+        contentAlignment = Alignment.CenterStart
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 18.dp, vertical = 16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(14.dp)
+        ) {
+            leading?.invoke()
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color = contentColor
+                )
+                if (subtitle != null) {
+                    Text(
+                        text = subtitle,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = contentColor.copy(alpha = 0.7f)
+                    )
+                }
+            }
+            if (trailingIcon != null) {
+                Icon(
+                    imageVector = trailingIcon,
+                    contentDescription = null,
+                    tint = contentColor.copy(alpha = 0.7f),
+                    modifier = Modifier.size(20.dp)
+                )
+            }
+        }
+    }
+}
