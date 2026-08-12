@@ -32,6 +32,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
@@ -39,37 +40,30 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.tomfricks.cupidly.R
 import com.tomfricks.cupidly.keyboard.RizzSession
-import com.tomfricks.cupidly.ui.theme.IncomingBubble
+import com.tomfricks.cupidly.keyboard.RizzSession.TranscriptItem
 import com.tomfricks.cupidly.ui.theme.PebbleActionPill
 import com.tomfricks.cupidly.ui.theme.PebbleBubble
 import com.tomfricks.cupidly.ui.theme.PebbleIconButton
-
-/** One line of the keyboard's chat transcript. */
-data class KeyboardMessage(
-    val text: String,
-    val outgoing: Boolean,
-    /** Sent messages are committed already and are not tappable. */
-    val sent: Boolean = false
-)
+import com.tomfricks.cupidly.ui.theme.TypingBubble
 
 /** Height of the keyboard surface — tall enough for a readable screenshot. */
 private val PanelHeight = 300.dp
 
 /**
- * The whole keyboard surface, laid out as a chat you can follow up in:
- * the captured screenshot sits on the left, and the transcript of suggestions
- * (plus anything already sent) scrolls on the right.
+ * The whole keyboard surface, laid out as a chat you can follow up in: each
+ * captured screenshot sits on the left, replies land under it on the right, and
+ * new screenshots append below as an ongoing thread.
  *
  * Generation has no loading screen on purpose — the transcript stays on screen
- * and new suggestions simply appear in it.
+ * and an animated typing bubble shows at the bottom while replies are written.
  *
- * Rendered by the IME and, with a real screenshot, by the in-app demo screen —
- * so both are the same keyboard.
+ * Rendered by the IME straight off [RizzSession], so replies that arrived while
+ * this keyboard did not exist are already here.
  */
 @Composable
 fun KeyboardPanel(
     state: RizzSession.Status,
-    messages: List<KeyboardMessage>,
+    items: List<TranscriptItem>,
     errorMessage: String?,
     isDarkTheme: Boolean,
     onGenerate: () -> Unit,
@@ -77,9 +71,12 @@ fun KeyboardPanel(
     onNewChatClick: () -> Unit,
     onSettingsClick: () -> Unit,
     onBackspaceClick: () -> Unit,
-    modifier: Modifier = Modifier,
-    thumbnail: (@Composable () -> Unit)? = null
+    modifier: Modifier = Modifier
 ) {
+    val hasReplies = items.any {
+        it is TranscriptItem.SentReply || it is TranscriptItem.Suggestion
+    }
+
     Column(
         modifier = modifier
             .fillMaxWidth()
@@ -92,29 +89,28 @@ fun KeyboardPanel(
                 .fillMaxWidth()
                 .weight(1f)
         ) {
-            if (messages.isEmpty()) {
+            if (items.isEmpty()) {
                 // Nothing to talk about yet: no chat, no screenshot card — just
                 // the logo and what to do next.
                 EmptyState(
                     isDarkTheme = isDarkTheme,
-                    title = when (state) {
-                        RizzSession.Status.ERROR -> "Couldn't read that one"
-                        RizzSession.Status.GENERATING -> "Cooking rizz…"
-                        else -> "Take a screenshot"
+                    title = if (state == RizzSession.Status.ERROR) {
+                        "Couldn't read that one"
+                    } else {
+                        "Take a screenshot"
                     },
-                    body = when (state) {
-                        RizzSession.Status.ERROR -> errorMessage ?: "Something went wrong"
-                        RizzSession.Status.GENERATING ->
-                            "Reading the chat and writing your replies"
-
-                        else -> "So Hook knows what's on your screen"
+                    body = if (state == RizzSession.Status.ERROR) {
+                        errorMessage ?: "Something went wrong"
+                    } else {
+                        "So Hook knows what's on your screen"
                     }
                 )
             } else {
                 ChatTranscript(
-                    messages = messages,
+                    transcript = items,
+                    state = state,
+                    errorMessage = errorMessage,
                     isDarkTheme = isDarkTheme,
-                    thumbnail = thumbnail,
                     onSuggestionClick = onSuggestionClick
                 )
             }
@@ -144,7 +140,7 @@ fun KeyboardPanel(
 
                 KeyboardBottomBar(
                     state = state,
-                    hasMessages = messages.isNotEmpty(),
+                    hasReplies = hasReplies,
                     onGenerate = onGenerate,
                     onNewChatClick = onNewChatClick,
                     onSettingsClick = onSettingsClick,
@@ -156,8 +152,8 @@ fun KeyboardPanel(
 }
 
 /**
- * The captured screenshot, shown as an attachment card at the top of the chat —
- * the way a quoted image sits above the replies in a messaging app.
+ * A captured screenshot, shown as an attachment card in the chat — the way a
+ * quoted image sits above the replies in a messaging app.
  */
 @Composable
 private fun ScreenshotCard(
@@ -199,21 +195,26 @@ private fun ScreenshotCard(
 }
 
 /**
- * One vertical chat: the screenshot card first, then every reply below it —
- * suggestions and already-sent messages alike.
+ * One vertical chat rendered from the ordered session transcript: screenshots on
+ * the left, sent replies and tappable suggestions on the right, and the typing
+ * bubble while replies are being written. Multiple screenshots interleave with
+ * replies so follow-ups read as one ongoing thread.
  */
 @Composable
 private fun ChatTranscript(
-    messages: List<KeyboardMessage>,
+    transcript: List<TranscriptItem>,
+    state: RizzSession.Status,
+    errorMessage: String?,
     isDarkTheme: Boolean,
-    thumbnail: (@Composable () -> Unit)?,
     onSuggestionClick: (String) -> Unit
 ) {
     val listState = rememberLazyListState()
+    val showError = state == RizzSession.Status.ERROR && errorMessage != null
 
-    LaunchedEffect(messages.size) {
-        if (messages.isNotEmpty()) {
-            listState.animateScrollToItem(messages.size)
+    LaunchedEffect(transcript.size, showError) {
+        val count = transcript.size + if (showError) 1 else 0
+        if (count > 0) {
+            listState.animateScrollToItem(count)
         }
     }
 
@@ -223,35 +224,66 @@ private fun ChatTranscript(
         verticalArrangement = Arrangement.spacedBy(8.dp),
         horizontalAlignment = Alignment.End
     ) {
-        item {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.Start
-            ) {
-                ScreenshotCard(isDarkTheme = isDarkTheme, content = thumbnail)
-            }
-        }
+        items(transcript) { item ->
+            when (item) {
+                is TranscriptItem.Screenshot -> Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.Start
+                ) {
+                    ScreenshotCard(isDarkTheme = isDarkTheme) {
+                        // Anchor the crop to the top so the start of the
+                        // conversation is visible instead of the middle.
+                        Image(
+                            bitmap = item.bitmap.asImageBitmap(),
+                            contentDescription = "Captured screenshot",
+                            contentScale = ContentScale.Crop,
+                            alignment = Alignment.TopCenter,
+                            modifier = Modifier.fillMaxSize()
+                        )
+                    }
+                }
 
-        items(messages) { message ->
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = if (message.outgoing) Arrangement.End else Arrangement.Start
-            ) {
-                when {
-                    !message.outgoing -> IncomingBubble(
-                        text = message.text,
-                        modifier = Modifier.widthIn(max = 240.dp)
-                    )
-
-                    message.sent -> PebbleBubble(
-                        text = message.text,
+                is TranscriptItem.SentReply -> Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End
+                ) {
+                    PebbleBubble(
+                        text = item.text,
                         onClick = null,
                         modifier = Modifier.widthIn(max = 240.dp)
                     )
+                }
 
-                    else -> PebbleBubble(
-                        text = message.text,
-                        onClick = { onSuggestionClick(message.text) },
+                is TranscriptItem.Suggestion -> Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End
+                ) {
+                    PebbleBubble(
+                        text = item.text,
+                        onClick = { onSuggestionClick(item.text) },
+                        modifier = Modifier.widthIn(max = 240.dp)
+                    )
+                }
+
+                TranscriptItem.Typing -> Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.Start
+                ) {
+                    TypingBubble()
+                }
+            }
+        }
+
+        if (showError) {
+            item {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.Start
+                ) {
+                    Text(
+                        text = errorMessage!!,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
                         modifier = Modifier.widthIn(max = 240.dp)
                     )
                 }
@@ -263,7 +295,7 @@ private fun ChatTranscript(
 @Composable
 private fun KeyboardBottomBar(
     state: RizzSession.Status,
-    hasMessages: Boolean,
+    hasReplies: Boolean,
     onGenerate: () -> Unit,
     onNewChatClick: () -> Unit,
     onSettingsClick: () -> Unit,
@@ -286,7 +318,7 @@ private fun KeyboardBottomBar(
         PebbleActionPill(
             text = when {
                 isGenerating -> "Cooking rizz…"
-                hasMessages -> "Generate more rizz"
+                hasReplies -> "Generate more rizz"
                 else -> "Generate rizz"
             },
             onClick = onGenerate,

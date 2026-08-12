@@ -7,15 +7,9 @@ import android.os.Build
 import android.util.Log
 import android.view.View
 import android.view.inputmethod.EditorInfo
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.isSystemInDarkTheme
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.ui.Alignment
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.asImageBitmap
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.platform.ViewCompositionStrategy
 import androidx.lifecycle.Lifecycle
@@ -28,7 +22,6 @@ import com.tomfricks.cupidly.data.PreferencesRepository
 import com.tomfricks.cupidly.data.ThemeMode
 import com.tomfricks.cupidly.data.UserPreferences
 import com.tomfricks.cupidly.service.ScreenshotDetectionService
-import com.tomfricks.cupidly.ui.keyboard.KeyboardMessage
 import com.tomfricks.cupidly.ui.keyboard.KeyboardPanel
 import com.tomfricks.cupidly.ui.theme.CupidlyTheme
 import kotlinx.coroutines.CoroutineScope
@@ -89,48 +82,25 @@ class CupidlyKeyboardService : InputMethodService(), LifecycleOwner {
                 }
 
                 CupidlyTheme(themeMode = userPreferences.themeMode) {
-                    // Rendered straight off the shared session, so replies that
-                    // arrived while this keyboard did not exist are already here.
-                    val screenshot = RizzSession.screenshot
-
+                    // Rendered straight off the shared session, so the whole
+                    // transcript — every screenshot, reply and typing bubble —
+                    // that built up while this keyboard did not exist is already
+                    // here.
                     KeyboardPanel(
                         state = RizzSession.status,
-                        messages = buildTranscript(),
+                        items = RizzSession.items,
                         errorMessage = RizzSession.error,
                         isDarkTheme = isDarkTheme,
                         onGenerate = ::onGenerateClicked,
                         onSuggestionClick = ::onSuggestionClicked,
                         onNewChatClick = ::onNewChatClicked,
                         onSettingsClick = ::openSettings,
-                        onBackspaceClick = ::onBackspaceClicked,
-                        thumbnail = if (screenshot != null) {
-                            {
-                                // Anchor the crop to the top so the start of the
-                                // conversation is visible instead of the middle.
-                                Image(
-                                    bitmap = screenshot.asImageBitmap(),
-                                    contentDescription = "Captured screenshot",
-                                    contentScale = ContentScale.Crop,
-                                    alignment = Alignment.TopCenter,
-                                    modifier = Modifier.fillMaxSize()
-                                )
-                            }
-                        } else {
-                            null
-                        }
+                        onBackspaceClick = ::onBackspaceClicked
                     )
                 }
             }
         }
     }
-
-    /**
-     * Sent replies stay in the transcript above the fresh suggestions, so the
-     * conversation reads as a chat you can keep following up in.
-     */
-    private fun buildTranscript(): List<KeyboardMessage> =
-        RizzSession.sent.map { KeyboardMessage(text = it, outgoing = true, sent = true) } +
-            RizzSession.suggestions.map { KeyboardMessage(text = it, outgoing = true, sent = false) }
 
     override fun onStartInputView(info: EditorInfo?, restarting: Boolean) {
         super.onStartInputView(info, restarting)
@@ -143,10 +113,10 @@ class CupidlyKeyboardService : InputMethodService(), LifecycleOwner {
         // while the app was cold, or generation died with no keyboard alive):
         // start it here rather than waiting for a tap.
         if (RizzSession.status != RizzSession.Status.GENERATING &&
-            RizzSession.suggestions.isEmpty() &&
+            !RizzSession.hasPendingSuggestions &&
             RizzSession.hasFreshScreenshot
         ) {
-            RizzSession.screenshot?.let { generateReplies(it) }
+            RizzSession.latestScreenshot?.let { generateReplies(it) }
         }
     }
 
@@ -166,9 +136,9 @@ class CupidlyKeyboardService : InputMethodService(), LifecycleOwner {
         // disabled in the UI, this just guards the callback.
         if (RizzSession.status == RizzSession.Status.GENERATING) return
 
-        val screenshot = RizzSession.screenshot
+        val screenshot = RizzSession.latestScreenshot
         if (screenshot != null && RizzSession.hasFreshScreenshot) {
-            // "Generate more rizz": another round on the same screenshot.
+            // "Generate more rizz": another round on the latest screenshot.
             generateReplies(screenshot)
         } else {
             RizzSession.onFailure(
