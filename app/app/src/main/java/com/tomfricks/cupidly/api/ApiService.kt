@@ -278,7 +278,7 @@ class ApiService(
     }
 
     companion object {
-        const val DEFAULT_SERVER_URL = "https://cupidly.onrender.com"
+        const val DEFAULT_SERVER_URL = "https://hook-kso8.onrender.com"
 
         private const val TAG = "ApiService"
         private const val HEADER_API_KEY = "X-Api-Key"

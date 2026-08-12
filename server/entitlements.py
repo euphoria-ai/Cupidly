@@ -21,7 +21,7 @@ import httpx
 
 REVENUECAT_API_BASE = os.getenv("REVENUECAT_API_BASE", "https://api.revenuecat.com/v1")
 REVENUECAT_SECRET_KEY = os.getenv("REVENUECAT_SECRET_KEY")
-ENTITLEMENT_ID = os.getenv("REVENUECAT_ENTITLEMENT_ID", "pro")
+ENTITLEMENT_ID = os.getenv("REVENUECAT_ENTITLEMENT_ID", "Hook Pro")
 
 try:
     CACHE_TTL_SECONDS = float(os.getenv("ENTITLEMENT_CACHE_TTL_SECONDS", "60"))
