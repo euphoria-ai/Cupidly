@@ -22,6 +22,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Backspace
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -29,6 +30,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
@@ -72,7 +74,8 @@ fun KeyboardPanel(
     isDarkTheme: Boolean,
     onGenerate: () -> Unit,
     onSuggestionClick: (String) -> Unit,
-    onPlusClick: () -> Unit,
+    onNewChatClick: () -> Unit,
+    onSettingsClick: () -> Unit,
     onBackspaceClick: () -> Unit,
     modifier: Modifier = Modifier,
     thumbnail: (@Composable () -> Unit)? = null
@@ -104,7 +107,7 @@ fun KeyboardPanel(
                         RizzSession.Status.GENERATING ->
                             "Reading the chat and writing your replies"
 
-                        else -> "So Cupidly knows what's on your screen"
+                        else -> "So Hook knows what's on your screen"
                     }
                 )
             } else {
@@ -117,15 +120,38 @@ fun KeyboardPanel(
             }
         }
 
-        Spacer(modifier = Modifier.height(10.dp))
+        // The controls rest on a dark, semi-transparent fade that rises off the
+        // bottom of the chat, so the "Generate rizz" pill and its neighbours read
+        // clearly over the transcript without a hard band.
+        Box(modifier = Modifier.fillMaxWidth()) {
+            Box(
+                modifier = Modifier
+                    .matchParentSize()
+                    .background(
+                        Brush.verticalGradient(
+                            colors = listOf(
+                                Color.Transparent,
+                                Color.Black.copy(alpha = 0.6f)
+                            )
+                        )
+                    )
+            )
 
-        KeyboardBottomBar(
-            state = state,
-            hasMessages = messages.isNotEmpty(),
-            onGenerate = onGenerate,
-            onPlusClick = onPlusClick,
-            onBackspaceClick = onBackspaceClick
-        )
+            Column {
+                // Fade zone above the bar — this is the "bit of chat" the scrim
+                // covers before darkening behind the controls.
+                Spacer(modifier = Modifier.height(28.dp))
+
+                KeyboardBottomBar(
+                    state = state,
+                    hasMessages = messages.isNotEmpty(),
+                    onGenerate = onGenerate,
+                    onNewChatClick = onNewChatClick,
+                    onSettingsClick = onSettingsClick,
+                    onBackspaceClick = onBackspaceClick
+                )
+            }
+        }
     }
 }
 
@@ -239,30 +265,41 @@ private fun KeyboardBottomBar(
     state: RizzSession.Status,
     hasMessages: Boolean,
     onGenerate: () -> Unit,
-    onPlusClick: () -> Unit,
+    onNewChatClick: () -> Unit,
+    onSettingsClick: () -> Unit,
     onBackspaceClick: () -> Unit
 ) {
+    val isGenerating = state == RizzSession.Status.GENERATING
+
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(10.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
+        // "+" clears the chat and starts a fresh hidden session.
         PebbleIconButton(
             icon = Icons.Default.Add,
-            contentDescription = "Cupidly settings",
-            onClick = onPlusClick
+            contentDescription = "New chat",
+            onClick = onNewChatClick
         )
 
         PebbleActionPill(
             text = when {
-                state == RizzSession.Status.GENERATING ->
-                    "Cooking rizz…"
-
+                isGenerating -> "Cooking rizz…"
                 hasMessages -> "Generate more rizz"
                 else -> "Generate rizz"
             },
             onClick = onGenerate,
+            // Locked while a round is cooking so it can't be fired twice.
+            enabled = !isGenerating,
             modifier = Modifier.weight(1f)
+        )
+
+        // Settings moved to their own gear now that "+" starts a new chat.
+        PebbleIconButton(
+            icon = Icons.Default.Settings,
+            contentDescription = "Hook settings",
+            onClick = onSettingsClick
         )
 
         PebbleIconButton(
@@ -328,7 +365,7 @@ private fun EmptyState(
                     id = if (isDarkTheme) R.drawable.heart_transparent
                     else R.drawable.heart_transparent_light
                 ),
-                contentDescription = "Cupidly",
+                contentDescription = "Hook",
                 contentScale = ContentScale.Fit,
                 modifier = Modifier.size(48.dp)
             )

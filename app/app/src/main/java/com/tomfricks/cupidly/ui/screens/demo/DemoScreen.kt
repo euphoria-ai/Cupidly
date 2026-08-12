@@ -86,14 +86,14 @@ private data class DemoSlide(
 private val demoSlides = listOf(
     DemoSlide(
         step = "1",
-        title = "Switch to the Cupidly keyboard",
+        title = "Switch to the Hook keyboard",
         body = "In the practice chat, tap the message box, then use the keyboard switch " +
-            "button (or the globe key) and pick Cupidly Keyboard."
+            "button (or the globe key) and pick Hook Keyboard."
     ),
     DemoSlide(
         step = "2",
         title = "Screenshot the chat",
-        body = "Power + Volume Down. Cupidly reads what's on screen — that's how it knows " +
+        body = "Power + Volume Down. Hook reads what's on screen — that's how it knows " +
             "who you're talking to and what they just said."
     ),
     DemoSlide(
@@ -298,7 +298,7 @@ private fun DemoChat(onNavigateBack: () -> Unit) {
             item {
                 PebbleRow(
                     title = "Screenshot this chat, then tap Generate rizz",
-                    subtitle = "Switch to the Cupidly keyboard first — the button is below.",
+                    subtitle = "Switch to the Hook keyboard first — the button is below.",
                     tone = PebbleTone.MUTED
                 )
             }

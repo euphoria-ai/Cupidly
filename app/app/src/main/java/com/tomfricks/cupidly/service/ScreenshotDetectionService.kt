@@ -20,6 +20,7 @@ import android.provider.MediaStore
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import com.tomfricks.cupidly.api.ApiService
+import com.tomfricks.cupidly.keyboard.ConversationSession
 import com.tomfricks.cupidly.data.PreferencesRepository
 import com.tomfricks.cupidly.data.UserPreferences
 import com.tomfricks.cupidly.keyboard.RizzSession
@@ -226,7 +227,7 @@ class ScreenshotDetectionService : Service() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(
                 CHANNEL_ID,
-                "Cupidly Screenshot Detection",
+                "Hook Screenshot Detection",
                 NotificationManager.IMPORTANCE_LOW
             ).apply {
                 description = "Detects screenshots for AI reply generation"
@@ -241,19 +242,26 @@ class ScreenshotDetectionService : Service() {
         serviceScope.launch(Dispatchers.IO) {
             try {
                 val prefs = preferencesRepository.userPreferencesFlow.first()
-                
-                val result = apiService.generateReplies(bitmap, prefs)
-                
-                result.onSuccess { replies ->
+
+                // Carry the hidden session context into the request; it keeps
+                // building even across screenshots where no reply was picked.
+                val currentContext = ConversationSession.conversationContext
+
+                val result = apiService.generateReplies(bitmap, prefs, currentContext)
+
+                result.onSuccess { generated ->
+                    // Persist the updated context (in memory only) before the UI
+                    // shows the fresh suggestions.
+                    ConversationSession.update(generated.context)
                     withContext(Dispatchers.Main) {
-                        RizzSession.onSuggestions(replies)
-                        onAutoReplyGenerated?.invoke(replies)
+                        RizzSession.onSuggestions(generated.suggestions)
+                        onAutoReplyGenerated?.invoke(generated.suggestions)
                     }
-                    Log.d("ScreenshotDetection", "Auto-generated ${replies.size} replies")
+                    Log.d("ScreenshotDetection", "Auto-generated ${generated.suggestions.size} replies")
                 }.onFailure { error ->
                     Log.e("ScreenshotDetection", "Error generating auto replies", error)
                     withContext(Dispatchers.Main) {
-                        val reason = error.message ?: "Couldn't reach Cupidly"
+                        val reason = error.message ?: "Couldn't reach Hook"
                         RizzSession.onFailure(reason)
                         onAutoReplyFailed?.invoke(reason)
                     }
@@ -261,7 +269,7 @@ class ScreenshotDetectionService : Service() {
             } catch (e: Exception) {
                 Log.e("ScreenshotDetection", "Error generating auto replies", e)
                 withContext(Dispatchers.Main) {
-                    val reason = e.message ?: "Couldn't reach Cupidly"
+                    val reason = e.message ?: "Couldn't reach Hook"
                     RizzSession.onFailure(reason)
                     onAutoReplyFailed?.invoke(reason)
                 }
@@ -271,7 +279,7 @@ class ScreenshotDetectionService : Service() {
     
     private fun createNotification(): Notification {
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("Cupidly is active")
+            .setContentTitle("Hook is active")
             .setContentText("Take a screenshot for automatic AI replies")
             .setSmallIcon(android.R.drawable.ic_dialog_info)
             .setPriority(NotificationCompat.PRIORITY_LOW)

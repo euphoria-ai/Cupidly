@@ -100,14 +100,14 @@ fun HomeScreen(
                 id = if (isDarkTheme) R.drawable.heart_transparent
                 else R.drawable.heart_transparent_light
             ),
-            contentDescription = "Cupidly",
+            contentDescription = "Hook",
             modifier = Modifier.size(120.dp),
         )
 
         Spacer(modifier = Modifier.height(24.dp))
 
         Text(
-            text = "Cupidly",
+            text = "Hook",
             style = MaterialTheme.typography.displayMedium,
             fontWeight = FontWeight.Bold,
             color = MaterialTheme.colorScheme.primary
@@ -496,7 +496,7 @@ fun BioEditDialog(
 
     PebbleDialog(
         title = "Edit Bio",
-        subtitle = "The more Cupidly knows, the sharper the rizz.",
+        subtitle = "The more Hook knows, the sharper the rizz.",
         onDismiss = onDismiss
     ) {
         OutlinedTextField(

@@ -12,6 +12,7 @@ import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
@@ -99,14 +100,18 @@ class CupidlyKeyboardService : InputMethodService(), LifecycleOwner {
                         isDarkTheme = isDarkTheme,
                         onGenerate = ::onGenerateClicked,
                         onSuggestionClick = ::onSuggestionClicked,
-                        onPlusClick = ::openSettings,
+                        onNewChatClick = ::onNewChatClicked,
+                        onSettingsClick = ::openSettings,
                         onBackspaceClick = ::onBackspaceClicked,
                         thumbnail = if (screenshot != null) {
                             {
+                                // Anchor the crop to the top so the start of the
+                                // conversation is visible instead of the middle.
                                 Image(
                                     bitmap = screenshot.asImageBitmap(),
                                     contentDescription = "Captured screenshot",
                                     contentScale = ContentScale.Crop,
+                                    alignment = Alignment.TopCenter,
                                     modifier = Modifier.fillMaxSize()
                                 )
                             }
@@ -157,6 +162,10 @@ class CupidlyKeyboardService : InputMethodService(), LifecycleOwner {
     }
 
     private fun onGenerateClicked() {
+        // Ignore taps while a round is already in flight — the button is also
+        // disabled in the UI, this just guards the callback.
+        if (RizzSession.status == RizzSession.Status.GENERATING) return
+
         val screenshot = RizzSession.screenshot
         if (screenshot != null && RizzSession.hasFreshScreenshot) {
             // "Generate more rizz": another round on the same screenshot.
@@ -184,13 +193,18 @@ class CupidlyKeyboardService : InputMethodService(), LifecycleOwner {
             RizzSession.onGenerating()
 
             val prefs = preferencesRepository.userPreferencesFlow.first()
-            val result = apiService?.generateReplies(screenshot, prefs)
 
-            result?.onSuccess { suggestions ->
-                RizzSession.onSuggestions(suggestions)
-                Log.d("CupidlyKeyboard", "Generated ${suggestions.size} suggestions")
+            // Carry the hidden session context into the request and store the
+            // server's updated context (in memory only) before showing replies.
+            val currentContext = ConversationSession.conversationContext
+            val result = apiService?.generateReplies(screenshot, prefs, currentContext)
+
+            result?.onSuccess { generated ->
+                ConversationSession.update(generated.context)
+                RizzSession.onSuggestions(generated.suggestions)
+                Log.d("CupidlyKeyboard", "Generated ${generated.suggestions.size} suggestions")
             }?.onFailure { error ->
-                RizzSession.onFailure(error.message ?: "Couldn't reach Cupidly")
+                RizzSession.onFailure(error.message ?: "Couldn't reach Hook")
                 Log.e("CupidlyKeyboard", "Error generating replies", error)
             }
         }
@@ -201,8 +215,10 @@ class CupidlyKeyboardService : InputMethodService(), LifecycleOwner {
         ic.commitText(suggestion, 1)
 
         // Keep the panel open: the tapped reply moves into the sent transcript
-        // so follow-ups can continue from it.
+        // and is recorded in the hidden session context so the next generation
+        // knows what was actually sent.
         RizzSession.markSent(suggestion)
+        ConversationSession.recordSentReply(suggestion)
     }
 
     private fun openSettings() {
@@ -210,6 +226,16 @@ class CupidlyKeyboardService : InputMethodService(), LifecycleOwner {
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         }
         startActivity(intent)
+    }
+
+    /**
+     * Start a fresh session: wipe the hidden conversation context and every
+     * on-screen trace so the next screenshot begins a brand-new conversation.
+     */
+    private fun onNewChatClicked() {
+        ConversationSession.reset()
+        RizzSession.reset()
+        Log.d("CupidlyKeyboard", "New session started")
     }
 
     private fun onBackspaceClicked() {

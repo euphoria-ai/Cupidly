@@ -1,17 +1,17 @@
 <resources>
-    <string name="app_name">Cupidly</string>
-    <string name="keyboard_name">Cupidly Keyboard</string>
+    <string name="app_name">Hook</string>
+    <string name="keyboard_name">Hook Keyboard</string>
     <string name="tagline">Type Less. Feel More.</string>
     
     <!-- Onboarding -->
-    <string name="welcome_title">Welcome to Cupidly</string>
+    <string name="welcome_title">Welcome to Hook</string>
     <string name="welcome_subtitle">Your AI-powered texting assistant</string>
-    <string name="enable_keyboard_title">Enable Cupidly Keyboard</string>
-    <string name="enable_keyboard_description">Go to Settings → System → Languages &amp; input → On-screen keyboard and enable Cupidly Keyboard</string>
-    <string name="select_keyboard_title">Select Cupidly as Input Method</string>
-    <string name="select_keyboard_description">When typing, tap the keyboard icon and select Cupidly</string>
+    <string name="enable_keyboard_title">Enable Hook Keyboard</string>
+    <string name="enable_keyboard_description">Go to Settings → System → Languages &amp; input → On-screen keyboard and enable Hook Keyboard</string>
+    <string name="select_keyboard_title">Select Hook as Input Method</string>
+    <string name="select_keyboard_description">When typing, tap the keyboard icon and select Hook</string>
     <string name="how_to_use_title">How to Use</string>
-    <string name="how_to_use_description">Take a screenshot of your chat, then tap Generate rizz in the Cupidly keyboard to get AI-generated replies</string>
+    <string name="how_to_use_description">Take a screenshot of your chat, then tap Generate rizz in the Hook keyboard to get AI-generated replies</string>
     
     <!-- Keyboard -->
     <string name="tap_heart_prompt">1. Take screenshot\n2. Tap Generate rizz</string>
@@ -33,7 +33,7 @@
     <string name="emoji_use_label">Emoji Use</string>
     
     <!-- Privacy -->
-    <string name="privacy_description">Cupidly detects when you take a screenshot and uses it to generate AI replies. YOU control when screenshots are taken using your device\'s screenshot button. Cupidly only reads the screenshot you manually captured. We don\'t store your conversations or personal data. Screenshots are processed and immediately discarded.</string>
+    <string name="privacy_description">Hook detects when you take a screenshot and uses it to generate AI replies. YOU control when screenshots are taken using your device\'s screenshot button. Hook only reads the screenshot you manually captured. We don\'t store your conversations or personal data. Screenshots are processed and immediately discarded.</string>
     
     <!-- API Configuration -->
     <!-- For Android Emulator: use 10.0.2.2 to access host machine's localhost -->

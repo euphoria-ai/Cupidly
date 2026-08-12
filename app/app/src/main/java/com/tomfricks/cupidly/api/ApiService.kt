@@ -19,6 +19,12 @@ interface CupidlyApiInterface {
     suspend fun generateReplies(@Body request: GenerateRepliesRequest): GenerateRepliesResponse
 }
 
+/** Suggestions plus the updated hidden conversation context returned together. */
+data class GeneratedReplies(
+    val suggestions: List<String>,
+    val context: ConversationContext
+)
+
 class ApiService(private val serverUrl: String = "https://cupidly.onrender.com") {
     
     private val okHttpClient = OkHttpClient.Builder()
@@ -37,8 +43,9 @@ class ApiService(private val serverUrl: String = "https://cupidly.onrender.com")
     
     suspend fun generateReplies(
         screenshot: Bitmap,
-        preferences: UserPreferences
-    ): Result<List<String>> = withContext(Dispatchers.IO) {
+        preferences: UserPreferences,
+        context: ConversationContext = ConversationContext()
+    ): Result<GeneratedReplies> = withContext(Dispatchers.IO) {
         try {
             // Convert bitmap to base64
             val base64Image = bitmapToBase64(screenshot)
@@ -59,20 +66,21 @@ class ApiService(private val serverUrl: String = "https://cupidly.onrender.com")
             // print preferencesDto
             Log.d("ApiService", "PreferencesDto: $preferencesDto")
             
-            // Create request
+            // Create request — carry the hidden session context forward
             val request = GenerateRepliesRequest(
                 screenshotBase64 = base64Image,
-                preferences = preferencesDto
+                preferences = preferencesDto,
+                context = context
             )
-            
+
             // Make API call
             val response = api.generateReplies(request)
-            
+
             if (response.suggestions.isEmpty()) {
                 Result.failure(Exception("No suggestions received from server"))
             } else {
                 Log.d("ApiService", "Received ${response.suggestions.size} suggestions")
-                Result.success(response.suggestions)
+                Result.success(GeneratedReplies(response.suggestions, response.context))
             }
             
         } catch (e: Exception) {

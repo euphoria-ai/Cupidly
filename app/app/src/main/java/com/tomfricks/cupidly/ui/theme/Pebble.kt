@@ -29,6 +29,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
@@ -228,11 +229,14 @@ fun PebbleButton(
 fun PebbleActionPill(
     text: String,
     onClick: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true
 ) {
     PebbleSurface(
-        onClick = onClick,
-        modifier = modifier,
+        // A null onClick makes the surface non-clickable; dim it so the disabled
+        // state reads clearly.
+        onClick = if (enabled) onClick else null,
+        modifier = if (enabled) modifier else modifier.alpha(0.5f),
         tone = PebbleTone.SLATE,
         cornerRadius = 18.dp,
         elevation = 4.dp

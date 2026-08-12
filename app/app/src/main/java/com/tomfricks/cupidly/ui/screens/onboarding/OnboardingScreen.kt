@@ -173,14 +173,14 @@ fun WelcomeSlide() {
                 id = if (isDarkTheme) R.drawable.heart_transparent
                      else R.drawable.heart_transparent_light
             ),
-            contentDescription = "Cupidly",
+            contentDescription = "Hook",
             modifier = Modifier.size(120.dp)
         )
         
         Spacer(modifier = Modifier.height(32.dp))
 
         Text(
-            text = "Cupidly",
+            text = "Hook",
             style = MaterialTheme.typography.displayMedium,
             fontWeight = FontWeight.Bold,
             color = MaterialTheme.colorScheme.primary
@@ -225,7 +225,7 @@ fun EnableKeyboardSlide(context: Context) {
         Spacer(modifier = Modifier.height(16.dp))
         
         Text(
-            text = "Activate Cupidly in your system settings",
+            text = "Activate Hook in your system settings",
             style = MaterialTheme.typography.bodyLarge,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center
