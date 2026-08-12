@@ -15,6 +15,7 @@ import com.tomfricks.cupidly.ui.screens.guide.GuideScreen
 import com.tomfricks.cupidly.ui.screens.home.HomeScreen
 import com.tomfricks.cupidly.ui.screens.onboarding.OnboardingScreen
 import com.tomfricks.cupidly.ui.screens.paywall.PaywallScreen
+import com.tomfricks.cupidly.ui.screens.subscription.CustomerCenterScreen
 
 sealed class Screen(val route: String) {
     object Onboarding : Screen("onboarding")
@@ -22,6 +23,7 @@ sealed class Screen(val route: String) {
     object Guide : Screen("guide")
     object Demo : Screen("demo")
     object Paywall : Screen("paywall")
+    object CustomerCenter : Screen("customer_center")
 }
 
 /**
@@ -80,6 +82,9 @@ fun CupidlyNavigation(paywallRequest: Int = 0) {
                 onNavigateToPaywall = {
                     navController.navigate(Screen.Paywall.route)
                 },
+                onNavigateToCustomerCenter = {
+                    navController.navigate(Screen.CustomerCenter.route)
+                },
                 preferencesRepository = preferencesRepository,
                 userPreferences = userPreferences,
                 isPro = isPro
@@ -101,6 +106,12 @@ fun CupidlyNavigation(paywallRequest: Int = 0) {
 
         composable(Screen.Paywall.route) {
             PaywallScreen(
+                onNavigateBack = { navController.popBackStack() }
+            )
+        }
+
+        composable(Screen.CustomerCenter.route) {
+            CustomerCenterScreen(
                 onNavigateBack = { navController.popBackStack() }
             )
         }

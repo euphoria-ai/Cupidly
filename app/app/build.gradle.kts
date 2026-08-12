@@ -31,9 +31,14 @@ val hasReleaseSigning = listOf(
 // exposed as BuildConfig constants. Both default to "" so a fresh clone still
 // builds and runs — the app degrades gracefully instead of crashing.
 //
-// Add these keys to local.properties to wire the app up for real:
-//   REVENUECAT_PUBLIC_SDK_KEY=goog_XXXXXXXXXXXXXXXXXXXXXXXXXXXX
+// Add these keys to local.properties to wire the app up for real, e.g.:
+//   REVENUECAT_PUBLIC_SDK_KEY=test_zcNICYbcEkZmlkRuJveuUJnOBzF
 //   APP_API_KEY=the-shared-key-the-Cupidly-server-expects
+//
+// The key prefix decides which store the SDK talks to, and the SDK works it out
+// on its own — `goog_` drives real Google Play Billing, `test_` drives
+// RevenueCat's Test Store (sandbox purchases, no Play account needed). The app
+// code never inspects the prefix, so either kind of key just works.
 //
 // The RevenueCat *public* SDK key is designed to ship inside the app. Never put
 // the RevenueCat secret key (or any Supabase key) here — those are server-only.
@@ -114,6 +119,8 @@ dependencies {
     implementation(libs.converter.gson)
     implementation(libs.gson)
     implementation(libs.revenuecat.purchases)
+    // RevenueCat's dashboard-configured Paywalls + Customer Center (Compose).
+    implementation(libs.revenuecat.purchases.ui)
     testImplementation(libs.junit)
     androidTestImplementation(platform(libs.androidx.compose.bom))
     androidTestImplementation(libs.androidx.compose.ui.test.junit4)

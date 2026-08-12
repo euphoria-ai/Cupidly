@@ -10,11 +10,13 @@ import com.revenuecat.purchases.Package
 import com.revenuecat.purchases.PurchaseParams
 import com.revenuecat.purchases.Purchases
 import com.revenuecat.purchases.PurchasesConfiguration
-import com.revenuecat.purchases.getCustomerInfoWith
-import com.revenuecat.purchases.getOfferingsWith
+import com.revenuecat.purchases.PurchasesException
+import com.revenuecat.purchases.PurchasesTransactionException
+import com.revenuecat.purchases.awaitCustomerInfo
+import com.revenuecat.purchases.awaitOfferings
+import com.revenuecat.purchases.awaitPurchase
+import com.revenuecat.purchases.awaitRestore
 import com.revenuecat.purchases.interfaces.UpdatedCustomerInfoListener
-import com.revenuecat.purchases.purchaseWith
-import com.revenuecat.purchases.restorePurchasesWith
 import com.tomfricks.cupidly.BuildConfig
 import com.tomfricks.cupidly.data.PreferencesRepository
 import kotlinx.coroutines.CoroutineScope
@@ -30,14 +32,30 @@ import kotlinx.coroutines.launch
 sealed interface PurchaseResult {
     data object Success : PurchaseResult
 
-    /** The user backed out of the Play sheet — not an error, say nothing. */
+    /** The user backed out of the purchase sheet — not an error, say nothing. */
     data object Cancelled : PurchaseResult
 
     data class Failed(val message: String) : PurchaseResult
 }
 
 /**
- * Thin wrapper around the RevenueCat SDK.
+ * Where the current offering stands. The paywall needs to tell "still loading"
+ * apart from "the dashboard has no offering", because only the second case
+ * should fall back to the hand-rolled screen.
+ */
+sealed interface OfferingsState {
+    data object Idle : OfferingsState
+
+    data object Loading : OfferingsState
+
+    /** A fetch completed. [offering] is null when no current offering is configured. */
+    data class Ready(val offering: Offering?) : OfferingsState
+
+    data class Failed(val message: String) : OfferingsState
+}
+
+/**
+ * Thin wrapper around the RevenueCat SDK (v9).
  *
  * A process-wide singleton because the paywall (an Activity), the keyboard IME
  * and the screenshot service all need the same entitlement answer, and
@@ -46,11 +64,23 @@ sealed interface PurchaseResult {
  * Everything degrades quietly when [BuildConfig.REVENUECAT_PUBLIC_SDK_KEY] is
  * blank, so a debug build with no keys in `local.properties` still runs: the
  * SDK is simply never configured and [isAvailable] stays false.
+ *
+ * The key's prefix (`goog_` for Google Play, `test_` for RevenueCat's Test
+ * Store) selects the backing store inside the SDK. Nothing here assumes one or
+ * the other.
  */
 object BillingManager {
 
-    /** Entitlement identifier configured in the RevenueCat dashboard. */
-    const val ENTITLEMENT_PRO = "pro"
+    /**
+     * The one place the entitlement identifier is written down.
+     *
+     * Must match the identifier in the RevenueCat dashboard and the server's
+     * `REVENUECAT_ENTITLEMENT_ID`. "Hook Pro" is only the display name.
+     */
+    const val ENTITLEMENT_ID = "pro"
+
+    /** Human-readable name for the thing [ENTITLEMENT_ID] unlocks. */
+    const val PRO_DISPLAY_NAME = "Hook Pro"
 
     private const val TAG = "BillingManager"
 
@@ -60,16 +90,13 @@ object BillingManager {
 
     private val _isPro = MutableStateFlow(false)
 
-    /** True while the "pro" entitlement is active. Painted from cache, then confirmed. */
+    /** True while the [ENTITLEMENT_ID] entitlement is active. Cache first, then confirmed. */
     val isPro: StateFlow<Boolean> = _isPro.asStateFlow()
 
-    private val _currentOffering = MutableStateFlow<Offering?>(null)
+    private val _offeringsState = MutableStateFlow<OfferingsState>(OfferingsState.Idle)
 
-    /** The current RevenueCat offering, or null until [refreshOfferings] answers. */
-    val currentOffering: StateFlow<Offering?> = _currentOffering.asStateFlow()
-
-    private val _isLoadingOfferings = MutableStateFlow(false)
-    val isLoadingOfferings: StateFlow<Boolean> = _isLoadingOfferings.asStateFlow()
+    /** The current offering and how the last fetch went. */
+    val offeringsState: StateFlow<OfferingsState> = _offeringsState.asStateFlow()
 
     private val _isAvailable = MutableStateFlow(false)
 
@@ -118,97 +145,111 @@ object BillingManager {
             UpdatedCustomerInfoListener { customerInfo -> onCustomerInfo(customerInfo) }
 
         _isAvailable.value = true
-        refreshCustomerInfo()
-        refreshOfferings()
+        refreshInBackground()
+    }
+
+    /** Fire-and-forget refresh for callers that aren't in a coroutine (Activity.onResume). */
+    fun refreshInBackground() {
+        scope.launch {
+            refreshCustomerInfo()
+            refreshOfferings()
+        }
     }
 
     /** Re-read the entitlement from RevenueCat (launch, resume, after a purchase). */
-    fun refreshCustomerInfo() {
+    suspend fun refreshCustomerInfo() {
         if (!Purchases.isConfigured) return
-        Purchases.sharedInstance.getCustomerInfoWith(
-            onError = { error -> Log.e(TAG, "Could not load customer info: ${error.message}") },
-            onSuccess = { customerInfo -> onCustomerInfo(customerInfo) }
-        )
-    }
-
-    /** Load the current offering and its packages for the paywall. */
-    fun refreshOfferings() {
-        if (!Purchases.isConfigured) return
-        _isLoadingOfferings.value = true
-        Purchases.sharedInstance.getOfferingsWith(
-            onError = { error ->
-                _isLoadingOfferings.value = false
-                Log.e(TAG, "Could not load offerings: ${error.message}")
-            },
-            onSuccess = { offerings ->
-                _isLoadingOfferings.value = false
-                _currentOffering.value = offerings.current
-            }
-        )
+        try {
+            onCustomerInfo(Purchases.sharedInstance.awaitCustomerInfo())
+        } catch (e: PurchasesException) {
+            Log.e(TAG, "Could not load customer info: ${e.message}")
+        }
     }
 
     /**
-     * Start the Play purchase flow. RevenueCat needs a real [Activity] to host
-     * the billing sheet, which is why the keyboard hands the user off to
+     * Load the current offering. Whatever the dashboard says is current wins —
+     * the app never assumes a particular set of packages.
+     */
+    suspend fun refreshOfferings() {
+        if (!Purchases.isConfigured) return
+        _offeringsState.value = OfferingsState.Loading
+        _offeringsState.value = try {
+            OfferingsState.Ready(Purchases.sharedInstance.awaitOfferings().current)
+        } catch (e: PurchasesException) {
+            Log.e(TAG, "Could not load offerings: ${e.message}")
+            OfferingsState.Failed(e.message)
+        }
+    }
+
+    /**
+     * Start the purchase flow. RevenueCat needs a real [Activity] to host the
+     * billing sheet, which is why the keyboard hands the user off to
      * MainActivity instead of buying in-place.
      */
-    fun purchase(activity: Activity, packageToPurchase: Package, onResult: (PurchaseResult) -> Unit) {
+    suspend fun purchase(activity: Activity, packageToPurchase: Package): PurchaseResult {
         if (!Purchases.isConfigured) {
-            onResult(PurchaseResult.Failed("Purchases aren't available right now"))
-            return
+            return PurchaseResult.Failed("Purchases aren't available right now")
         }
-        Purchases.sharedInstance.purchaseWith(
-            PurchaseParams.Builder(activity, packageToPurchase).build(),
-            onError = { error, userCancelled ->
-                if (userCancelled) {
-                    onResult(PurchaseResult.Cancelled)
-                } else {
-                    Log.e(TAG, "Purchase failed: ${error.message}")
-                    onResult(PurchaseResult.Failed(error.message))
-                }
-            },
-            onSuccess = { _, customerInfo ->
-                onCustomerInfo(customerInfo)
-                onResult(
-                    if (customerInfo.hasPro()) {
-                        PurchaseResult.Success
-                    } else {
-                        PurchaseResult.Failed("Purchase went through but Pro isn't active yet")
-                    }
-                )
+        return try {
+            val result = Purchases.sharedInstance.awaitPurchase(
+                PurchaseParams.Builder(activity, packageToPurchase).build()
+            )
+            onCustomerInfo(result.customerInfo)
+            if (result.customerInfo.hasPro()) {
+                PurchaseResult.Success
+            } else {
+                PurchaseResult.Failed("Purchase went through but $PRO_DISPLAY_NAME isn't active yet")
             }
-        )
+        } catch (e: PurchasesTransactionException) {
+            if (e.userCancelled) {
+                PurchaseResult.Cancelled
+            } else {
+                Log.e(TAG, "Purchase failed: ${e.message}")
+                PurchaseResult.Failed(e.message)
+            }
+        } catch (e: PurchasesException) {
+            Log.e(TAG, "Purchase failed: ${e.message}")
+            PurchaseResult.Failed(e.message)
+        }
     }
 
     /** Bring back a subscription bought on another install of the same account. */
-    fun restorePurchases(onResult: (PurchaseResult) -> Unit) {
+    suspend fun restorePurchases(): PurchaseResult {
         if (!Purchases.isConfigured) {
-            onResult(PurchaseResult.Failed("Purchases aren't available right now"))
-            return
+            return PurchaseResult.Failed("Purchases aren't available right now")
         }
-        Purchases.sharedInstance.restorePurchasesWith(
-            onError = { error ->
-                Log.e(TAG, "Restore failed: ${error.message}")
-                onResult(PurchaseResult.Failed(error.message))
-            },
-            onSuccess = { customerInfo ->
-                onCustomerInfo(customerInfo)
-                onResult(
-                    if (customerInfo.hasPro()) {
-                        PurchaseResult.Success
-                    } else {
-                        PurchaseResult.Failed("No active Hook Pro subscription found")
-                    }
-                )
+        return try {
+            val customerInfo = Purchases.sharedInstance.awaitRestore()
+            onCustomerInfo(customerInfo)
+            if (customerInfo.hasPro()) {
+                PurchaseResult.Success
+            } else {
+                PurchaseResult.Failed("No active $PRO_DISPLAY_NAME subscription found")
             }
-        )
+        } catch (e: PurchasesTransactionException) {
+            if (e.userCancelled) {
+                PurchaseResult.Cancelled
+            } else {
+                Log.e(TAG, "Restore failed: ${e.message}")
+                PurchaseResult.Failed(e.message)
+            }
+        } catch (e: PurchasesException) {
+            Log.e(TAG, "Restore failed: ${e.message}")
+            PurchaseResult.Failed(e.message)
+        }
     }
 
     private fun CustomerInfo.hasPro(): Boolean =
-        entitlements[ENTITLEMENT_PRO]?.isActive == true
+        entitlements[ENTITLEMENT_ID]?.isActive == true
 
-    /** Single funnel for every entitlement update: state flow + persisted cache. */
-    private fun onCustomerInfo(customerInfo: CustomerInfo) {
+    /**
+     * Single funnel for every entitlement update: state flow + persisted cache.
+     *
+     * Public because RevenueCat's own Paywall and Customer Center hand us a
+     * fresh [CustomerInfo] through their listeners, and that has to land in the
+     * same place as our own refreshes.
+     */
+    fun onCustomerInfo(customerInfo: CustomerInfo) {
         val pro = customerInfo.hasPro()
         _isPro.value = pro
 

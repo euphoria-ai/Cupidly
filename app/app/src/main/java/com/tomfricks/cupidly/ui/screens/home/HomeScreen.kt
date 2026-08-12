@@ -24,6 +24,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -36,6 +37,8 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.tomfricks.cupidly.R
+import com.tomfricks.cupidly.billing.BillingManager
+import com.tomfricks.cupidly.billing.PurchaseResult
 import com.tomfricks.cupidly.data.EmojiUse
 import com.tomfricks.cupidly.data.FlirtLevel
 import com.tomfricks.cupidly.data.MessageStyle
@@ -63,12 +66,17 @@ fun HomeScreen(
     onNavigateToGuide: () -> Unit,
     onNavigateToDemo: () -> Unit,
     onNavigateToPaywall: () -> Unit,
+    onNavigateToCustomerCenter: () -> Unit,
     preferencesRepository: PreferencesRepository,
     userPreferences: UserPreferences,
     isPro: Boolean = false
 ) {
     var currentPreferences by remember { mutableStateOf(userPreferences) }
     val coroutineScope = rememberCoroutineScope()
+
+    val billingAvailable by BillingManager.isAvailable.collectAsState()
+    var isRestoring by remember { mutableStateOf(false) }
+    var restoreMessage by remember { mutableStateOf<String?>(null) }
 
     // State for showing dropdowns
     var showStyleDropdown by remember { mutableStateOf(false) }
@@ -156,6 +164,43 @@ fun HomeScreen(
             tone = if (isPro) PebbleTone.MUTED else PebbleTone.BLUE,
             trailingIcon = Icons.Default.ChevronRight
         )
+
+        // Play expects subscribers to be able to manage or cancel from inside
+        // the app; RevenueCat's Customer Center is that screen. Non-subscribers
+        // get the lighter-weight restore affordance instead.
+        if (billingAvailable) {
+            Spacer(modifier = Modifier.height(12.dp))
+
+            if (isPro) {
+                PebbleRow(
+                    title = "Manage subscription",
+                    subtitle = "Change your plan, restore purchases or cancel.",
+                    onClick = onNavigateToCustomerCenter,
+                    trailingIcon = Icons.Default.ChevronRight
+                )
+            } else {
+                PebbleRow(
+                    title = if (isRestoring) "Restoring…" else "Restore purchases",
+                    subtitle = "Already subscribed? Bring ${BillingManager.PRO_DISPLAY_NAME} back.",
+                    onClick = {
+                        if (!isRestoring) {
+                            isRestoring = true
+                            coroutineScope.launch {
+                                val result = BillingManager.restorePurchases()
+                                isRestoring = false
+                                restoreMessage = when (result) {
+                                    is PurchaseResult.Success ->
+                                        "${BillingManager.PRO_DISPLAY_NAME} restored."
+                                    is PurchaseResult.Cancelled -> null
+                                    is PurchaseResult.Failed -> result.message
+                                }
+                            }
+                        }
+                    },
+                    trailingIcon = Icons.Default.ChevronRight
+                )
+            }
+        }
 
         Spacer(modifier = Modifier.height(24.dp))
 
@@ -443,6 +488,26 @@ fun HomeScreen(
                 showBioDialog = false
             }
         )
+    }
+
+    // Outcome of a "Restore purchases" tap.
+    val currentRestoreMessage = restoreMessage
+    if (currentRestoreMessage != null) {
+        PebbleDialog(
+            title = "Restore purchases",
+            subtitle = currentRestoreMessage,
+            onDismiss = { restoreMessage = null }
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.End
+            ) {
+                PebbleTextButton(
+                    text = "OK",
+                    onClick = { restoreMessage = null }
+                )
+            }
+        }
     }
 
     // Reset Confirmation Dialog

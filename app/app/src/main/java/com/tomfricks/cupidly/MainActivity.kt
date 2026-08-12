@@ -72,7 +72,7 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         // A subscription can be bought, cancelled or refunded outside the app.
-        BillingManager.refreshCustomerInfo()
+        BillingManager.refreshInBackground()
     }
 
     /** The keyboard can't host a Play purchase sheet, so it sends the user here. */
