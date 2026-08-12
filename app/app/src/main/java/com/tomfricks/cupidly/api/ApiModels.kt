@@ -47,7 +47,44 @@ data class GenerateRepliesResponse(
     @SerializedName("suggestions")
     val suggestions: List<String>,
     @SerializedName("context")
-    val context: ConversationContext = ConversationContext()
+    val context: ConversationContext = ConversationContext(),
+    // Allowance state, so the paywall UI stays current without a /me round-trip.
+    // `remaining` counts FREE generations only — ignore it when isPro is true.
+    @SerializedName("is_pro")
+    val isPro: Boolean = false,
+    @SerializedName("free_used")
+    val freeUsed: Int = 0,
+    @SerializedName("free_limit")
+    val freeLimit: Int = 0,
+    @SerializedName("remaining")
+    val remaining: Int = 0
+)
+
+/** Body of `GET /me` — entitlement + allowance for this install. */
+data class MeResponse(
+    @SerializedName("app_user_id")
+    val appUserId: String = "",
+    @SerializedName("is_pro")
+    val isPro: Boolean = false,
+    @SerializedName("free_used")
+    val freeUsed: Int = 0,
+    @SerializedName("free_limit")
+    val freeLimit: Int = 0,
+    @SerializedName("remaining")
+    val remaining: Int = 0
+)
+
+/**
+ * Body of the HTTP 402 the server returns once the lifetime free allowance is
+ * spent: `{"error": "allowance_exhausted", "free_limit": N, "used": M}`.
+ */
+data class AllowanceExhaustedResponse(
+    @SerializedName("error")
+    val error: String = "",
+    @SerializedName("free_limit")
+    val freeLimit: Int = 0,
+    @SerializedName("used")
+    val used: Int = 0
 )
 
 data class ErrorResponse(

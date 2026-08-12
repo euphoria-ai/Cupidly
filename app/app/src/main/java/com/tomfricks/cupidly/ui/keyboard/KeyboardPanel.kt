@@ -3,6 +3,7 @@ package com.tomfricks.cupidly.ui.keyboard
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -71,11 +72,18 @@ fun KeyboardPanel(
     onNewChatClick: () -> Unit,
     onSettingsClick: () -> Unit,
     onBackspaceClick: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    isPro: Boolean = false,
+    freeRemaining: Int = 0,
+    paywallRequired: Boolean = false,
+    onUpgradeClick: () -> Unit = {}
 ) {
     val hasReplies = items.any {
         it is TranscriptItem.SentReply || it is TranscriptItem.Suggestion
     }
+
+    // Pro is never nagged and never blocked.
+    val showUpsell = paywallRequired && !isPro
 
     Column(
         modifier = modifier
@@ -84,6 +92,14 @@ fun KeyboardPanel(
             .background(MaterialTheme.colorScheme.background)
             .padding(horizontal = 12.dp, vertical = 10.dp)
     ) {
+        if (!isPro && !showUpsell) {
+            AllowanceChip(
+                remaining = freeRemaining,
+                onClick = onUpgradeClick
+            )
+            Spacer(modifier = Modifier.height(6.dp))
+        }
+
         Box(
             modifier = Modifier
                 .fillMaxWidth()
@@ -134,20 +150,69 @@ fun KeyboardPanel(
             )
 
             Column {
-                // Fade zone above the bar — this is the "bit of chat" the scrim
-                // covers before darkening behind the controls.
-                Spacer(modifier = Modifier.height(28.dp))
+                if (showUpsell) {
+                    // Sits where the fade normally is, so the panel keeps its
+                    // height and the transcript stays readable behind it.
+                    Text(
+                        text = "You're out of free rizz. Go Pro for unlimited.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Color.White,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 8.dp)
+                            .height(28.dp)
+                    )
+                } else {
+                    // Fade zone above the bar — this is the "bit of chat" the
+                    // scrim covers before darkening behind the controls.
+                    Spacer(modifier = Modifier.height(28.dp))
+                }
 
                 KeyboardBottomBar(
                     state = state,
                     hasReplies = hasReplies,
+                    showUpsell = showUpsell,
                     onGenerate = onGenerate,
+                    onUpgradeClick = onUpgradeClick,
                     onNewChatClick = onNewChatClick,
                     onSettingsClick = onSettingsClick,
                     onBackspaceClick = onBackspaceClick
                 )
             }
         }
+    }
+}
+
+/**
+ * The free-generation counter for non-Pro users, tucked into the top-right of
+ * the panel. Tapping it opens the paywall in the main app.
+ */
+@Composable
+private fun AllowanceChip(
+    remaining: Int,
+    onClick: () -> Unit
+) {
+    val shape = RoundedCornerShape(10.dp)
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.End,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            text = if (remaining > 0) "$remaining free left" else "Go Pro",
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier
+                .clip(shape)
+                .background(
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f),
+                    shape = shape
+                )
+                .clickable(onClick = onClick)
+                .padding(horizontal = 10.dp, vertical = 4.dp)
+        )
     }
 }
 
@@ -296,7 +361,9 @@ private fun ChatTranscript(
 private fun KeyboardBottomBar(
     state: RizzSession.Status,
     hasReplies: Boolean,
+    showUpsell: Boolean,
     onGenerate: () -> Unit,
+    onUpgradeClick: () -> Unit,
     onNewChatClick: () -> Unit,
     onSettingsClick: () -> Unit,
     onBackspaceClick: () -> Unit
@@ -317,13 +384,16 @@ private fun KeyboardBottomBar(
 
         PebbleActionPill(
             text = when {
+                showUpsell -> "Unlock unlimited rizz"
                 isGenerating -> "Cooking rizz…"
                 hasReplies -> "Generate more rizz"
                 else -> "Generate rizz"
             },
-            onClick = onGenerate,
+            // An IME can't host the Play purchase sheet, so this hands the user
+            // to MainActivity on the paywall route instead.
+            onClick = if (showUpsell) onUpgradeClick else onGenerate,
             // Locked while a round is cooking so it can't be fired twice.
-            enabled = !isGenerating,
+            enabled = showUpsell || !isGenerating,
             modifier = Modifier.weight(1f)
         )
 

@@ -65,6 +65,15 @@ object RizzSession {
     var error by mutableStateOf<String?>(null)
         private set
 
+    /**
+     * Set when the server refused a generation because the lifetime free
+     * allowance is spent (HTTP 402). Sticky on purpose: it survives [reset] and
+     * only clears once the user is entitled, so the keyboard keeps showing the
+     * upsell instead of a "Generate rizz" button that can only fail.
+     */
+    var paywallRequired by mutableStateOf(false)
+        private set
+
     var screenshotAt: Long = 0L
         private set
 
@@ -129,6 +138,22 @@ object RizzSession {
     }
 
     /**
+     * The free allowance ran out. Not an error — the transcript stays exactly
+     * as it is and the keyboard swaps its action for an upgrade prompt.
+     */
+    fun onAllowanceExhausted() {
+        error = null
+        items = items.filterNot { it is TranscriptItem.Typing }
+        paywallRequired = true
+        status = if (items.isEmpty()) Status.IDLE else Status.SHOWING
+    }
+
+    /** Called once the user is Pro, so the upsell disappears without a restart. */
+    fun clearPaywallRequired() {
+        paywallRequired = false
+    }
+
+    /**
      * Keep a tapped reply and drop the rest: the chosen suggestion becomes a
      * sent bubble at the bottom of the transcript and every other pending
      * suggestion is removed.
@@ -153,5 +178,7 @@ object RizzSession {
         error = null
         screenshotAt = 0L
         suggestionsAt = 0L
+        // paywallRequired is deliberately untouched: a new chat doesn't buy the
+        // user more free generations.
     }
 }

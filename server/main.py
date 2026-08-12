@@ -1,15 +1,23 @@
 import os
 import json
+import hmac
+import re
 from typing import List, Literal, Optional
-from fastapi import FastAPI, HTTPException
+from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from openai import AsyncOpenAI
 import httpx
 from dotenv import load_dotenv
 import time
 
+from entitlements import is_pro
+from store import get_store
+
 load_dotenv()
+
+APP_VERSION = "1.4.0"
 
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 if not GROQ_API_KEY:
@@ -31,16 +39,83 @@ _client = AsyncOpenAI(
 app = FastAPI(
     title="Cupidly",
     description="Backend service",
-    version="1.3.0"
+    version=APP_VERSION
 )
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+# --- CORS ---
+# The Android app is not a browser and needs no CORS at all; only the marketing
+# site would. Default to allowing nothing rather than the old allow_origins=["*"].
+ALLOWED_ORIGINS = [
+    origin.strip()
+    for origin in os.getenv("ALLOWED_ORIGINS", "").split(",")
+    if origin.strip()
+]
+if ALLOWED_ORIGINS:
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=ALLOWED_ORIGINS,
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+    print(f"[INFO] CORS enabled for: {', '.join(ALLOWED_ORIGINS)}")
+else:
+    print("[INFO] CORS disabled (no ALLOWED_ORIGINS set) — browser origins are "
+          "blocked. Native app clients are unaffected.")
+
+
+# --- Auth & allowance config ---
+
+APP_API_KEY = os.getenv("APP_API_KEY")
+if not APP_API_KEY:
+    print("[WARN] " + "!" * 66)
+    print("[WARN] APP_API_KEY is not set — the API is UNAUTHENTICATED and anyone "
+          "who finds this URL can burn the Groq quota.")
+    print("[WARN] Fine for local dev. NEVER deploy like this: set APP_API_KEY and "
+          "ship the same value in the app.")
+    print("[WARN] " + "!" * 66)
+
+try:
+    FREE_GENERATION_LIMIT = int(os.getenv("FREE_GENERATION_LIMIT", "5"))
+except ValueError:
+    print("[WARN] FREE_GENERATION_LIMIT is not an integer — using 5")
+    FREE_GENERATION_LIMIT = 5
+
+# Stable per-install UUID from the client; also the RevenueCat app user id.
+APP_USER_ID_PATTERN = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
+
+# One counter row per install. Screenshots and replies are never persisted.
+store = get_store()
+
+
+def require_api_key(x_api_key: Optional[str]) -> None:
+    """Constant-time shared-key check. Skipped entirely when unconfigured."""
+    if not APP_API_KEY:
+        return
+    supplied = (x_api_key or "").encode("utf-8")
+    expected = APP_API_KEY.encode("utf-8")
+    if not hmac.compare_digest(supplied, expected):
+        raise HTTPException(status_code=401, detail="Invalid or missing API key")
+
+
+def require_app_user_id(x_app_user_id: Optional[str]) -> str:
+    user_id = (x_app_user_id or "").strip()
+    if not APP_USER_ID_PATTERN.match(user_id):
+        raise HTTPException(
+            status_code=400,
+            detail="X-App-User-Id header is required: 1-128 characters of "
+                   "letters, digits, '-' or '_'",
+        )
+    return user_id
+
+
+async def authenticate(
+    x_api_key: Optional[str] = Header(default=None, alias="X-Api-Key"),
+    x_app_user_id: Optional[str] = Header(default=None, alias="X-App-User-Id"),
+) -> str:
+    """Shared gate for every metered route. Returns the caller's app user id."""
+    require_api_key(x_api_key)
+    return require_app_user_id(x_app_user_id)
 
 
 # --- Request/Response Models ---
@@ -73,6 +148,20 @@ class GenerateRepliesRequest(BaseModel):
 class GenerateRepliesResponse(BaseModel):
     suggestions: List[str]
     context: ConversationContext
+    # Allowance state, so the client can update its paywall UI without a /me
+    # round-trip. `remaining` counts FREE generations only — ignore it when
+    # is_pro is true, where generations are unlimited.
+    is_pro: bool = False
+    free_used: int = 0
+    free_limit: int = 0
+    remaining: int = 0
+
+class MeResponse(BaseModel):
+    app_user_id: str
+    is_pro: bool
+    free_used: int
+    free_limit: int
+    remaining: int
 
 
 # --- Structured Output Schema for Groq ---
@@ -181,13 +270,55 @@ def build_prompt(p: UserPreferences, context: Optional[ConversationContext] = No
 
 # --- Routes ---
 
+def _remaining(free_used: int) -> int:
+    return max(0, FREE_GENERATION_LIMIT - free_used)
+
+
 @app.get("/")
 async def root():
-    return {"status": "online", "service": "Cupidly", "version": "1.3.0"}
+    return {"status": "online", "service": "Cupidly", "version": APP_VERSION}
 
-@app.post("/generate-replies", response_model=GenerateRepliesResponse)
-async def generate_replies(request: GenerateRepliesRequest):
+
+@app.get("/me", response_model=MeResponse)
+async def me(app_user_id: str = Depends(authenticate)):
+    """Entitlement + free-allowance state for one install.
+
+    The app calls this on launch and after a purchase to refresh its paywall.
+    """
+    pro = await is_pro(app_user_id)
+    free_used = await store.get_used(app_user_id)
+    return MeResponse(
+        app_user_id=app_user_id,
+        is_pro=pro,
+        free_used=free_used,
+        free_limit=FREE_GENERATION_LIMIT,
+        remaining=_remaining(free_used),
+    )
+
+
+@app.post(
+    "/generate-replies",
+    response_model=GenerateRepliesResponse,
+    responses={402: {"description": "Free allowance exhausted — subscription required"}},
+)
+async def generate_replies(
+    request: GenerateRepliesRequest,
+    app_user_id: str = Depends(authenticate),
+):
     start_time = time.time()
+
+    # Pro is unlimited; everyone else spends from a lifetime free allowance.
+    pro = await is_pro(app_user_id)
+    free_used = await store.get_used(app_user_id)
+    if not pro and free_used >= FREE_GENERATION_LIMIT:
+        return JSONResponse(
+            status_code=402,
+            content={
+                "error": "allowance_exhausted",
+                "free_limit": FREE_GENERATION_LIMIT,
+                "used": free_used,
+            },
+        )
 
     try:
         # Pass the base64 payload straight through as a data URL — no re-encoding.
@@ -278,7 +409,26 @@ async def generate_replies(request: GenerateRepliesRequest):
             sent_replies=passthrough_sent,
         )
 
-        return GenerateRepliesResponse(suggestions=suggestions[:3], context=result_context)
+        # Only now — after a generation the user actually got — do we spend
+        # allowance. A Groq failure above never costs the user anything, and Pro
+        # users never touch the free counter at all.
+        if not pro:
+            try:
+                free_used = await store.increment(app_user_id)
+            except Exception as e:
+                # The user already has their replies; losing one tick of the
+                # counter is better than 500-ing on a delivered response.
+                print(f"[ERR] allowance increment failed for {app_user_id}: {e}")
+                free_used += 1
+
+        return GenerateRepliesResponse(
+            suggestions=suggestions[:3],
+            context=result_context,
+            is_pro=pro,
+            free_used=free_used,
+            free_limit=FREE_GENERATION_LIMIT,
+            remaining=_remaining(free_used),
+        )
 
     except HTTPException:
         raise

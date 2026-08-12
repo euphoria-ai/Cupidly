@@ -20,23 +20,28 @@ enum class MessageStyle(val displayName: String) {
     SENTENCE_CASE("Sentence case")
 }
 
-enum class MessageTone(val displayName: String) {
-    GEN_Z_SLANG("Gen-Z Slang"),
-    RESPECTFUL("Respectful"),
+/**
+ * `proOnly` marks a choice as part of Hook Pro. The defaults and a couple of
+ * everyday options stay free so the app is usable without a subscription; the
+ * more characterful settings are the upsell.
+ */
+enum class MessageTone(val displayName: String, val proOnly: Boolean = false) {
+    GEN_Z_SLANG("Gen-Z Slang", proOnly = true),
+    RESPECTFUL("Respectful", proOnly = true),
     FUNNY("Funny"),
     SMOOTH("Smooth")
 }
 
-enum class FlirtLevel(val displayName: String) {
+enum class FlirtLevel(val displayName: String, val proOnly: Boolean = false) {
     LESS("Less"),
     MEDIUM("Moderate"),
-    BOLD("Bold")
+    BOLD("Bold", proOnly = true)
 }
 
-enum class ReplyLength(val displayName: String) {
+enum class ReplyLength(val displayName: String, val proOnly: Boolean = false) {
     SHORT("Short"),
     NORMAL("Normal"),
-    EXTENDED("Extended")
+    EXTENDED("Extended", proOnly = true)
 }
 
 enum class EmojiUse(val displayName: String) {

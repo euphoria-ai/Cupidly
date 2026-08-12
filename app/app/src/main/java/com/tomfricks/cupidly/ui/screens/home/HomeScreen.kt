@@ -24,6 +24,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -36,6 +37,8 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.tomfricks.cupidly.R
+import com.tomfricks.cupidly.billing.BillingManager
+import com.tomfricks.cupidly.billing.PurchaseResult
 import com.tomfricks.cupidly.data.EmojiUse
 import com.tomfricks.cupidly.data.FlirtLevel
 import com.tomfricks.cupidly.data.MessageStyle
@@ -50,17 +53,30 @@ import com.tomfricks.cupidly.ui.theme.PebbleOption
 import com.tomfricks.cupidly.ui.theme.PebbleRow
 import com.tomfricks.cupidly.ui.theme.PebbleTextButton
 import com.tomfricks.cupidly.ui.theme.PebbleTone
+import com.tomfricks.cupidly.ui.theme.ProBadge
 import kotlinx.coroutines.launch
+
+/** Display names of the choices that only Hook Pro can pick. */
+private val proTones = MessageTone.values().filter { it.proOnly }.map { it.displayName }.toSet()
+private val proFlirtLevels = FlirtLevel.values().filter { it.proOnly }.map { it.displayName }.toSet()
+private val proReplyLengths = ReplyLength.values().filter { it.proOnly }.map { it.displayName }.toSet()
 
 @Composable
 fun HomeScreen(
     onNavigateToGuide: () -> Unit,
     onNavigateToDemo: () -> Unit,
+    onNavigateToPaywall: () -> Unit,
+    onNavigateToCustomerCenter: () -> Unit,
     preferencesRepository: PreferencesRepository,
-    userPreferences: UserPreferences
+    userPreferences: UserPreferences,
+    isPro: Boolean = false
 ) {
     var currentPreferences by remember { mutableStateOf(userPreferences) }
     val coroutineScope = rememberCoroutineScope()
+
+    val billingAvailable by BillingManager.isAvailable.collectAsState()
+    var isRestoring by remember { mutableStateOf(false) }
+    var restoreMessage by remember { mutableStateOf<String?>(null) }
 
     // State for showing dropdowns
     var showStyleDropdown by remember { mutableStateOf(false) }
@@ -133,6 +149,58 @@ fun HomeScreen(
             onClick = onNavigateToGuide,
             tone = PebbleTone.SLATE
         )
+
+        Spacer(modifier = Modifier.height(24.dp))
+
+        // Non-blocking upsell: always reachable, never in the way.
+        PebbleRow(
+            title = if (isPro) "Hook Pro" else "Upgrade to Pro",
+            subtitle = if (isPro) {
+                "Unlimited rizz. Thanks for the support."
+            } else {
+                "Unlimited rizz, every tone, every reply length."
+            },
+            onClick = onNavigateToPaywall,
+            tone = if (isPro) PebbleTone.MUTED else PebbleTone.BLUE,
+            trailingIcon = Icons.Default.ChevronRight
+        )
+
+        // Play expects subscribers to be able to manage or cancel from inside
+        // the app; RevenueCat's Customer Center is that screen. Non-subscribers
+        // get the lighter-weight restore affordance instead.
+        if (billingAvailable) {
+            Spacer(modifier = Modifier.height(12.dp))
+
+            if (isPro) {
+                PebbleRow(
+                    title = "Manage subscription",
+                    subtitle = "Change your plan, restore purchases or cancel.",
+                    onClick = onNavigateToCustomerCenter,
+                    trailingIcon = Icons.Default.ChevronRight
+                )
+            } else {
+                PebbleRow(
+                    title = if (isRestoring) "Restoring…" else "Restore purchases",
+                    subtitle = "Already subscribed? Bring ${BillingManager.PRO_DISPLAY_NAME} back.",
+                    onClick = {
+                        if (!isRestoring) {
+                            isRestoring = true
+                            coroutineScope.launch {
+                                val result = BillingManager.restorePurchases()
+                                isRestoring = false
+                                restoreMessage = when (result) {
+                                    is PurchaseResult.Success ->
+                                        "${BillingManager.PRO_DISPLAY_NAME} restored."
+                                    is PurchaseResult.Cancelled -> null
+                                    is PurchaseResult.Failed -> result.message
+                                }
+                            }
+                        }
+                    },
+                    trailingIcon = Icons.Default.ChevronRight
+                )
+            }
+        }
 
         Spacer(modifier = Modifier.height(24.dp))
 
@@ -275,6 +343,12 @@ fun HomeScreen(
                     preferencesRepository.updateUserPreferences(updated)
                 }
                 showToneDropdown = false
+            },
+            proOptions = proTones,
+            isPro = isPro,
+            onProRequired = {
+                showToneDropdown = false
+                onNavigateToPaywall()
             }
         )
     }
@@ -294,6 +368,12 @@ fun HomeScreen(
                     preferencesRepository.updateUserPreferences(updated)
                 }
                 showFlirtDropdown = false
+            },
+            proOptions = proFlirtLevels,
+            isPro = isPro,
+            onProRequired = {
+                showFlirtDropdown = false
+                onNavigateToPaywall()
             }
         )
     }
@@ -313,6 +393,12 @@ fun HomeScreen(
                     preferencesRepository.updateUserPreferences(updated)
                 }
                 showLengthDropdown = false
+            },
+            proOptions = proReplyLengths,
+            isPro = isPro,
+            onProRequired = {
+                showLengthDropdown = false
+                onNavigateToPaywall()
             }
         )
     }
@@ -404,6 +490,26 @@ fun HomeScreen(
         )
     }
 
+    // Outcome of a "Restore purchases" tap.
+    val currentRestoreMessage = restoreMessage
+    if (currentRestoreMessage != null) {
+        PebbleDialog(
+            title = "Restore purchases",
+            subtitle = currentRestoreMessage,
+            onDismiss = { restoreMessage = null }
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.End
+            ) {
+                PebbleTextButton(
+                    text = "OK",
+                    onClick = { restoreMessage = null }
+                )
+            }
+        }
+    }
+
     // Reset Confirmation Dialog
     if (showResetDialog) {
         PebbleDialog(
@@ -451,13 +557,20 @@ private fun SettingPebble(
     )
 }
 
+/**
+ * @param proOptions display names that need Hook Pro. They render with a "PRO"
+ *   badge and route to the paywall via [onProRequired] instead of being picked.
+ */
 @Composable
 fun SelectionDialog(
     title: String,
     options: List<String>,
     currentValue: String,
     onDismiss: () -> Unit,
-    onSelect: (String) -> Unit
+    onSelect: (String) -> Unit,
+    proOptions: Set<String> = emptySet(),
+    isPro: Boolean = true,
+    onProRequired: () -> Unit = {}
 ) {
     PebbleDialog(title = title, onDismiss = onDismiss) {
         Column(
@@ -467,10 +580,17 @@ fun SelectionDialog(
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             options.forEach { option ->
+                val locked = !isPro && option in proOptions
+                val trailing: (@Composable () -> Unit)? = if (locked) {
+                    { ProBadge() }
+                } else {
+                    null
+                }
                 PebbleOption(
                     text = option,
                     selected = option == currentValue,
-                    onClick = { onSelect(option) }
+                    onClick = { if (locked) onProRequired() else onSelect(option) },
+                    trailing = trailing
                 )
             }
         }
