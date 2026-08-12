@@ -36,10 +36,9 @@
     <string name="privacy_description">Hook detects when you take a screenshot and uses it to generate AI replies. YOU control when screenshots are taken using your device\'s screenshot button. Hook only reads the screenshot you manually captured. We don\'t store your conversations or personal data. Screenshots are processed and immediately discarded.</string>
     
     <!-- API Configuration -->
-    <!-- For Android Emulator: use 10.0.2.2 to access host machine's localhost -->
-    <!-- For Physical Device: use your computer's local IP (e.g., 192.168.1.100) -->
-    <!-- For Production: use your deployed server URL -->
-    <string name="api_server_url">http://10.0.2.2:8000</string>
+    <!-- Production server URL. HTTPS only (no cleartext/localhost in release). -->
+    <!-- The app reads this from ApiService's default serverUrl; keep them in sync. -->
+    <string name="api_server_url">https://cupidly.onrender.com</string>
     
     <!-- Common -->
     <string name="next">Next</string>

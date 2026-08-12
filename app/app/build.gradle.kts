@@ -1,7 +1,30 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
 }
+
+// Load keystore credentials from local.properties if present so that a keystore
+// is NOT required to build/sync/assembleDebug. Release stays unsigned when absent.
+//
+// Add these keys to local.properties (kept out of git) to enable release signing:
+//   RELEASE_STORE_FILE=/absolute/path/to/keystore.jks
+//   RELEASE_STORE_PASSWORD=your-store-password
+//   RELEASE_KEY_ALIAS=your-key-alias
+//   RELEASE_KEY_PASSWORD=your-key-password
+val keystoreProperties = Properties().apply {
+    val propsFile = rootProject.file("local.properties")
+    if (propsFile.exists()) {
+        propsFile.inputStream().use { load(it) }
+    }
+}
+val hasReleaseSigning = listOf(
+    "RELEASE_STORE_FILE",
+    "RELEASE_STORE_PASSWORD",
+    "RELEASE_KEY_ALIAS",
+    "RELEASE_KEY_PASSWORD",
+).all { keystoreProperties.getProperty(it)?.isNotBlank() == true }
 
 android {
     namespace = "com.tomfricks.cupidly"
@@ -10,7 +33,7 @@ android {
     }
 
     defaultConfig {
-        applicationId = "com.tomfricks.cupidly"
+        applicationId = "com.tom7.hook"
         minSdk = 29
         targetSdk = 36
         versionCode = 1
@@ -19,10 +42,30 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
+    signingConfigs {
+        if (hasReleaseSigning) {
+            create("release") {
+                storeFile = file(keystoreProperties.getProperty("RELEASE_STORE_FILE"))
+                storePassword = keystoreProperties.getProperty("RELEASE_STORE_PASSWORD")
+                keyAlias = keystoreProperties.getProperty("RELEASE_KEY_ALIAS")
+                keyPassword = keystoreProperties.getProperty("RELEASE_KEY_PASSWORD")
+            }
+        }
+    }
+
     buildTypes {
         release {
-            optimization {
-                enable = false
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro"
+            )
+            // Only attach the release signing config when the keystore
+            // credentials are provided; otherwise leave the build unsigned
+            // so configuration/assembleRelease degrades gracefully.
+            if (hasReleaseSigning) {
+                signingConfig = signingConfigs.getByName("release")
             }
         }
     }
