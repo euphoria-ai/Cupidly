@@ -11,5 +11,16 @@ dependencies = [
     "pillow>=12.3.0",
     "pydantic>=2.13.4",
     "python-dotenv>=1.2.2",
+    "supabase>=2.9.0",
     "uvicorn[standard]>=0.52.1",
 ]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3.0",
+    "pytest-asyncio>=0.24.0",
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["."]
