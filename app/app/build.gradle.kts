@@ -31,8 +31,9 @@ val hasReleaseSigning = listOf(
 // exposed as BuildConfig constants. Both default to "" so a fresh clone still
 // builds and runs — the app degrades gracefully instead of crashing.
 //
-// Add these keys to local.properties to wire the app up for real, e.g.:
-//   REVENUECAT_PUBLIC_SDK_KEY=test_zcNICYbcEkZmlkRuJveuUJnOBzF
+// Add these keys to local.properties (one per line, no quotes, no spaces
+// around the "=") to wire the app up for real:
+//   REVENUECAT_PUBLIC_SDK_KEY=test_XXXXXXXXXXXXXXXXXXXXXXXXXXX
 //   APP_API_KEY=the-shared-key-the-Cupidly-server-expects
 //
 // The key prefix decides which store the SDK talks to, and the SDK works it out
