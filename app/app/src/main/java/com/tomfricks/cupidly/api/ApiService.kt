@@ -1,55 +1,102 @@
 package com.tomfricks.cupidly.api
 
+import android.content.Context
 import android.graphics.Bitmap
 import android.util.Base64
 import android.util.Log
+import com.google.gson.Gson
+import com.tomfricks.cupidly.BuildConfig
+import com.tomfricks.cupidly.data.EntitlementState
+import com.tomfricks.cupidly.data.PreferencesRepository
 import com.tomfricks.cupidly.data.UserPreferences
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
+import okhttp3.Interceptor
 import okhttp3.OkHttpClient
+import retrofit2.Response
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
 import retrofit2.http.Body
+import retrofit2.http.GET
 import retrofit2.http.POST
 import java.io.ByteArrayOutputStream
 import java.util.concurrent.TimeUnit
 
 interface CupidlyApiInterface {
+    // Response<T> rather than a bare body: a 402 is a *product state*, not a
+    // crash, and we need its body to drive the paywall.
     @POST("/generate-replies")
-    suspend fun generateReplies(@Body request: GenerateRepliesRequest): GenerateRepliesResponse
+    suspend fun generateReplies(@Body request: GenerateRepliesRequest): Response<GenerateRepliesResponse>
+
+    @GET("/me")
+    suspend fun me(): Response<MeResponse>
 }
 
-/** Suggestions plus the updated hidden conversation context returned together. */
+/** Suggestions, the updated hidden conversation context, and what's left of the allowance. */
 data class GeneratedReplies(
     val suggestions: List<String>,
-    val context: ConversationContext
+    val context: ConversationContext,
+    val entitlement: EntitlementState
 )
 
-class ApiService(private val serverUrl: String = "https://cupidly.onrender.com") {
-    
+/**
+ * Outcome of a generation. "Out of free generations" is deliberately its own
+ * branch so callers can open the paywall instead of showing an error.
+ */
+sealed interface GenerateRepliesResult {
+    data class Success(val replies: GeneratedReplies) : GenerateRepliesResult
+
+    /** HTTP 402 — the lifetime free allowance is spent; the user must subscribe. */
+    data class AllowanceExhausted(val freeLimit: Int, val used: Int) : GenerateRepliesResult
+
+    data class Failure(val message: String, val code: Int? = null) : GenerateRepliesResult
+}
+
+class ApiService(
+    context: Context,
+    private val serverUrl: String = DEFAULT_SERVER_URL
+) {
+
+    private val appContext = context.applicationContext
+    private val preferencesRepository = PreferencesRepository(appContext)
+    private val gson = Gson()
+
+    /**
+     * Every request carries the shared app key and this install's stable id —
+     * the server rejects anything missing either (401 / 400 respectively).
+     */
+    private val authInterceptor = Interceptor { chain ->
+        val builder = chain.request().newBuilder()
+            .header(HEADER_API_KEY, BuildConfig.APP_API_KEY)
+        appUserId()?.let { builder.header(HEADER_APP_USER_ID, it) }
+        chain.proceed(builder.build())
+    }
+
     private val okHttpClient = OkHttpClient.Builder()
+        .addInterceptor(authInterceptor)
         .connectTimeout(60, TimeUnit.SECONDS)
         .readTimeout(60, TimeUnit.SECONDS)
         .writeTimeout(60, TimeUnit.SECONDS)
         .build()
-    
+
     private val retrofit = Retrofit.Builder()
         .baseUrl(serverUrl)
         .client(okHttpClient)
         .addConverterFactory(GsonConverterFactory.create())
         .build()
-    
+
     private val api = retrofit.create(CupidlyApiInterface::class.java)
-    
+
     suspend fun generateReplies(
         screenshot: Bitmap,
         preferences: UserPreferences,
         context: ConversationContext = ConversationContext()
-    ): Result<GeneratedReplies> = withContext(Dispatchers.IO) {
+    ): GenerateRepliesResult = withContext(Dispatchers.IO) {
         try {
             // Convert bitmap to base64
             val base64Image = bitmapToBase64(screenshot)
-            
+
             // Convert UserPreferences to PreferencesDto
             val preferencesDto = PreferencesDto(
                 style = preferences.style.name,
@@ -64,8 +111,8 @@ class ApiService(private val serverUrl: String = "https://cupidly.onrender.com")
             )
 
             // print preferencesDto
-            Log.d("ApiService", "PreferencesDto: $preferencesDto")
-            
+            Log.d(TAG, "PreferencesDto: $preferencesDto")
+
             // Create request — carry the hidden session context forward
             val request = GenerateRepliesRequest(
                 screenshotBase64 = base64Image,
@@ -76,19 +123,133 @@ class ApiService(private val serverUrl: String = "https://cupidly.onrender.com")
             // Make API call
             val response = api.generateReplies(request)
 
-            if (response.suggestions.isEmpty()) {
-                Result.failure(Exception("No suggestions received from server"))
-            } else {
-                Log.d("ApiService", "Received ${response.suggestions.size} suggestions")
-                Result.success(GeneratedReplies(response.suggestions, response.context))
+            if (!response.isSuccessful) {
+                return@withContext errorResult(response.code(), response.errorBody()?.string())
             }
-            
+
+            val body = response.body()
+                ?: return@withContext GenerateRepliesResult.Failure(
+                    "Empty response from server",
+                    response.code()
+                )
+
+            val entitlement = body.toEntitlementState()
+            cacheEntitlement(entitlement)
+
+            if (body.suggestions.isEmpty()) {
+                GenerateRepliesResult.Failure("No suggestions received from server")
+            } else {
+                Log.d(TAG, "Received ${body.suggestions.size} suggestions")
+                GenerateRepliesResult.Success(
+                    GeneratedReplies(body.suggestions, body.context, entitlement)
+                )
+            }
         } catch (e: Exception) {
-            Log.e("ApiService", "Error generating replies", e)
-            Result.failure(Exception("Failed to generate replies: ${e.message}"))
+            Log.e(TAG, "Error generating replies", e)
+            GenerateRepliesResult.Failure("Failed to generate replies: ${e.message}")
         }
     }
-    
+
+    /**
+     * Entitlement + allowance for this install. Called on launch and after a
+     * purchase so the paywall and the keyboard's counter stay honest.
+     */
+    suspend fun fetchEntitlement(): Result<EntitlementState> = withContext(Dispatchers.IO) {
+        try {
+            val response = api.me()
+            if (!response.isSuccessful) {
+                logHttpError(response.code(), "GET /me")
+                return@withContext Result.failure(
+                    Exception("GET /me failed with HTTP ${response.code()}")
+                )
+            }
+            val body = response.body()
+                ?: return@withContext Result.failure(Exception("Empty /me response"))
+
+            val entitlement = EntitlementState(
+                isPro = body.isPro,
+                freeUsed = body.freeUsed,
+                freeLimit = body.freeLimit.orDefaultLimit()
+            )
+            cacheEntitlement(entitlement)
+            Result.success(entitlement)
+        } catch (e: Exception) {
+            Log.e(TAG, "Error fetching entitlement", e)
+            Result.failure(e)
+        }
+    }
+
+    /** Maps a non-2xx response onto the typed result, logging enough to debug it. */
+    private suspend fun errorResult(code: Int, rawBody: String?): GenerateRepliesResult {
+        if (code == HTTP_PAYMENT_REQUIRED) {
+            val payload = rawBody?.let {
+                runCatching { gson.fromJson(it, AllowanceExhaustedResponse::class.java) }.getOrNull()
+            }
+            val freeLimit = payload?.freeLimit.orDefaultLimit()
+            val used = payload?.used ?: freeLimit
+            Log.i(TAG, "Free allowance exhausted ($used/$freeLimit) — paywall required")
+            cacheEntitlement(
+                EntitlementState(isPro = false, freeUsed = used, freeLimit = freeLimit)
+            )
+            return GenerateRepliesResult.AllowanceExhausted(freeLimit, used)
+        }
+
+        logHttpError(code, "POST /generate-replies")
+        val message = when (code) {
+            HTTP_BAD_REQUEST -> "Hook couldn't identify this install. Reopen the app and try again."
+            HTTP_UNAUTHORIZED -> "Hook couldn't sign in to the server."
+            else -> "Hook's server had a problem (HTTP $code)."
+        }
+        return GenerateRepliesResult.Failure(message, code)
+    }
+
+    private fun logHttpError(code: Int, route: String) {
+        when (code) {
+            HTTP_BAD_REQUEST -> Log.e(
+                TAG,
+                "$route rejected the $HEADER_APP_USER_ID header (HTTP 400). " +
+                    "Install id: ${PreferencesRepository.cachedAppUserId}"
+            )
+
+            HTTP_UNAUTHORIZED -> Log.e(
+                TAG,
+                "$route rejected the $HEADER_API_KEY header (HTTP 401). " +
+                    "Is APP_API_KEY set in local.properties?"
+            )
+
+            else -> Log.e(TAG, "$route failed with HTTP $code")
+        }
+    }
+
+    /**
+     * Persist what the server just told us. Doing it here means every surface —
+     * keyboard, home, paywall — sees a fresh count with no extra plumbing.
+     */
+    private suspend fun cacheEntitlement(state: EntitlementState) {
+        runCatching { preferencesRepository.updateEntitlement(state) }
+            .onFailure { Log.w(TAG, "Could not cache entitlement state", it) }
+    }
+
+    /**
+     * The install id for the `X-App-User-Id` header. Served from the
+     * process-wide cache; the blocking fallback only runs when the app hasn't
+     * warmed it yet, and interceptors never run on the main thread.
+     */
+    private fun appUserId(): String? = PreferencesRepository.cachedAppUserId
+        ?: runCatching { runBlocking { preferencesRepository.getOrCreateAppUserId() } }
+            .onFailure { Log.e(TAG, "Could not resolve the app user id", it) }
+            .getOrNull()
+
+    private fun GenerateRepliesResponse.toEntitlementState() = EntitlementState(
+        isPro = isPro,
+        freeUsed = freeUsed,
+        freeLimit = freeLimit.orDefaultLimit()
+    )
+
+    /** A missing/zero limit means the server didn't say; fall back to the known model. */
+    private fun Int?.orDefaultLimit(): Int =
+        if (this != null && this > 0) this else PreferencesRepository.DEFAULT_FREE_LIMIT
+
     private fun bitmapToBase64(bitmap: Bitmap): String {
         // Scale down bitmap to max width 640px before compression to make upload instant (<60KB instead of 4MB)
         val maxWidth = 640
@@ -110,5 +271,15 @@ class ApiService(private val serverUrl: String = "https://cupidly.onrender.com")
 
         return Base64.encodeToString(byteArray, Base64.NO_WRAP)
     }
-}
 
+    companion object {
+        const val DEFAULT_SERVER_URL = "https://cupidly.onrender.com"
+
+        private const val TAG = "ApiService"
+        private const val HEADER_API_KEY = "X-Api-Key"
+        private const val HEADER_APP_USER_ID = "X-App-User-Id"
+        private const val HTTP_BAD_REQUEST = 400
+        private const val HTTP_UNAUTHORIZED = 401
+        private const val HTTP_PAYMENT_REQUIRED = 402
+    }
+}

@@ -20,6 +20,7 @@ import android.provider.MediaStore
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import com.tomfricks.cupidly.api.ApiService
+import com.tomfricks.cupidly.api.GenerateRepliesResult
 import com.tomfricks.cupidly.keyboard.ConversationSession
 import com.tomfricks.cupidly.data.PreferencesRepository
 import com.tomfricks.cupidly.data.UserPreferences
@@ -54,7 +55,8 @@ class ScreenshotDetectionService : Service() {
         super.onCreate()
         createNotificationChannel()
         preferencesRepository = PreferencesRepository(this)
-        apiService = ApiService()
+        // Needs a Context to resolve this install's id for the auth headers.
+        apiService = ApiService(this)
     }
     
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -247,23 +249,38 @@ class ScreenshotDetectionService : Service() {
                 // building even across screenshots where no reply was picked.
                 val currentContext = ConversationSession.conversationContext
 
-                val result = apiService.generateReplies(bitmap, prefs, currentContext)
-
-                result.onSuccess { generated ->
-                    // Persist the updated context (in memory only) before the UI
-                    // shows the fresh suggestions.
-                    ConversationSession.update(generated.context)
-                    withContext(Dispatchers.Main) {
-                        RizzSession.onSuggestions(generated.suggestions)
-                        onAutoReplyGenerated?.invoke(generated.suggestions)
+                when (val result = apiService.generateReplies(bitmap, prefs, currentContext)) {
+                    is GenerateRepliesResult.Success -> {
+                        val generated = result.replies
+                        // Persist the updated context (in memory only) before the UI
+                        // shows the fresh suggestions.
+                        ConversationSession.update(generated.context)
+                        withContext(Dispatchers.Main) {
+                            RizzSession.onSuggestions(generated.suggestions)
+                            onAutoReplyGenerated?.invoke(generated.suggestions)
+                        }
+                        Log.d("ScreenshotDetection", "Auto-generated ${generated.suggestions.size} replies")
                     }
-                    Log.d("ScreenshotDetection", "Auto-generated ${generated.suggestions.size} replies")
-                }.onFailure { error ->
-                    Log.e("ScreenshotDetection", "Error generating auto replies", error)
-                    withContext(Dispatchers.Main) {
-                        val reason = error.message ?: "Couldn't reach Hook"
-                        RizzSession.onFailure(reason)
-                        onAutoReplyFailed?.invoke(reason)
+
+                    is GenerateRepliesResult.AllowanceExhausted -> {
+                        // The keyboard turns this into an upgrade prompt rather
+                        // than an error message.
+                        Log.i(
+                            "ScreenshotDetection",
+                            "Free allowance spent (${result.used}/${result.freeLimit})"
+                        )
+                        withContext(Dispatchers.Main) {
+                            RizzSession.onAllowanceExhausted()
+                            onAutoReplyFailed?.invoke("You're out of free rizz. Go Pro for unlimited.")
+                        }
+                    }
+
+                    is GenerateRepliesResult.Failure -> {
+                        Log.e("ScreenshotDetection", "Error generating auto replies: ${result.message}")
+                        withContext(Dispatchers.Main) {
+                            RizzSession.onFailure(result.message)
+                            onAutoReplyFailed?.invoke(result.message)
+                        }
                     }
                 }
             } catch (e: Exception) {

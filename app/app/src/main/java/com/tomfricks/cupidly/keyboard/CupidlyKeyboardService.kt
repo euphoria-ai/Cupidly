@@ -8,6 +8,7 @@ import android.util.Log
 import android.view.View
 import android.view.inputmethod.EditorInfo
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.platform.ComposeView
@@ -18,6 +19,9 @@ import androidx.lifecycle.setViewTreeLifecycleOwner
 import androidx.savedstate.setViewTreeSavedStateRegistryOwner
 import com.tomfricks.cupidly.MainActivity
 import com.tomfricks.cupidly.api.ApiService
+import com.tomfricks.cupidly.api.GenerateRepliesResult
+import com.tomfricks.cupidly.billing.BillingManager
+import com.tomfricks.cupidly.data.EntitlementState
 import com.tomfricks.cupidly.data.PreferencesRepository
 import com.tomfricks.cupidly.data.ThemeMode
 import com.tomfricks.cupidly.data.UserPreferences
@@ -45,8 +49,9 @@ class CupidlyKeyboardService : InputMethodService(), LifecycleOwner {
         super.onCreate()
         preferencesRepository = PreferencesRepository(this)
 
-        // Initialize API service
-        apiService = ApiService()
+        // Initialize API service — it needs a Context to resolve this install's
+        // id for the X-App-User-Id header.
+        apiService = ApiService(this)
 
         // Start screenshot detection service
         startScreenshotDetectionService()
@@ -81,6 +86,18 @@ class CupidlyKeyboardService : InputMethodService(), LifecycleOwner {
                     ThemeMode.SYSTEM -> systemInDarkTheme
                 }
 
+                // The cached allowance renders instantly; RevenueCat's live
+                // answer wins as soon as it lands.
+                val entitlement by preferencesRepository.entitlementFlow.collectAsState(
+                    initial = EntitlementState()
+                )
+                val billingIsPro by BillingManager.isPro.collectAsState()
+                val isPro = billingIsPro || entitlement.isPro
+
+                LaunchedEffect(isPro) {
+                    if (isPro) RizzSession.clearPaywallRequired()
+                }
+
                 CupidlyTheme(themeMode = userPreferences.themeMode) {
                     // Rendered straight off the shared session, so the whole
                     // transcript — every screenshot, reply and typing bubble —
@@ -95,7 +112,11 @@ class CupidlyKeyboardService : InputMethodService(), LifecycleOwner {
                         onSuggestionClick = ::onSuggestionClicked,
                         onNewChatClick = ::onNewChatClicked,
                         onSettingsClick = ::openSettings,
-                        onBackspaceClick = ::onBackspaceClicked
+                        onBackspaceClick = ::onBackspaceClicked,
+                        isPro = isPro,
+                        freeRemaining = entitlement.remaining,
+                        paywallRequired = RizzSession.paywallRequired,
+                        onUpgradeClick = ::openPaywall
                     )
                 }
             }
@@ -167,15 +188,31 @@ class CupidlyKeyboardService : InputMethodService(), LifecycleOwner {
             // Carry the hidden session context into the request and store the
             // server's updated context (in memory only) before showing replies.
             val currentContext = ConversationSession.conversationContext
-            val result = apiService?.generateReplies(screenshot, prefs, currentContext)
 
-            result?.onSuccess { generated ->
-                ConversationSession.update(generated.context)
-                RizzSession.onSuggestions(generated.suggestions)
-                Log.d("CupidlyKeyboard", "Generated ${generated.suggestions.size} suggestions")
-            }?.onFailure { error ->
-                RizzSession.onFailure(error.message ?: "Couldn't reach Hook")
-                Log.e("CupidlyKeyboard", "Error generating replies", error)
+            when (val result = apiService?.generateReplies(screenshot, prefs, currentContext)) {
+                is GenerateRepliesResult.Success -> {
+                    val generated = result.replies
+                    ConversationSession.update(generated.context)
+                    RizzSession.onSuggestions(generated.suggestions)
+                    Log.d("CupidlyKeyboard", "Generated ${generated.suggestions.size} suggestions")
+                }
+
+                is GenerateRepliesResult.AllowanceExhausted -> {
+                    // Not a failure: swap the panel over to the upsell so the
+                    // user can go buy Pro in the main app.
+                    RizzSession.onAllowanceExhausted()
+                    Log.i(
+                        "CupidlyKeyboard",
+                        "Free allowance spent (${result.used}/${result.freeLimit})"
+                    )
+                }
+
+                is GenerateRepliesResult.Failure -> {
+                    RizzSession.onFailure(result.message)
+                    Log.e("CupidlyKeyboard", "Error generating replies: ${result.message}")
+                }
+
+                null -> RizzSession.onFailure("Couldn't reach Hook")
             }
         }
     }
@@ -194,6 +231,18 @@ class CupidlyKeyboardService : InputMethodService(), LifecycleOwner {
     private fun openSettings() {
         val intent = Intent(this, MainActivity::class.java).apply {
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        startActivity(intent)
+    }
+
+    /**
+     * Google Play's purchase sheet needs a real Activity, which an IME is not,
+     * so hand the user over to MainActivity on the paywall route.
+     */
+    private fun openPaywall() {
+        val intent = Intent(this, MainActivity::class.java).apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            putExtra(MainActivity.EXTRA_SHOW_PAYWALL, true)
         }
         startActivity(intent)
     }

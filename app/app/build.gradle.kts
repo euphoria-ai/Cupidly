@@ -27,6 +27,22 @@ val hasReleaseSigning = listOf(
     "RELEASE_KEY_PASSWORD",
 ).all { keystoreProperties.getProperty(it)?.isNotBlank() == true }
 
+// Client secrets come from the same (gitignored) local.properties file and are
+// exposed as BuildConfig constants. Both default to "" so a fresh clone still
+// builds and runs — the app degrades gracefully instead of crashing.
+//
+// Add these keys to local.properties to wire the app up for real:
+//   REVENUECAT_PUBLIC_SDK_KEY=goog_XXXXXXXXXXXXXXXXXXXXXXXXXXXX
+//   APP_API_KEY=the-shared-key-the-Cupidly-server-expects
+//
+// The RevenueCat *public* SDK key is designed to ship inside the app. Never put
+// the RevenueCat secret key (or any Supabase key) here — those are server-only.
+fun secretLiteral(name: String): String {
+    val raw = keystoreProperties.getProperty(name)?.trim().orEmpty()
+    val escaped = raw.replace("\\", "\\\\").replace("\"", "\\\"")
+    return "\"$escaped\""
+}
+
 android {
     namespace = "com.tomfricks.cupidly"
     compileSdk = 35
@@ -39,6 +55,9 @@ android {
         versionName = "1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+        buildConfigField("String", "REVENUECAT_PUBLIC_SDK_KEY", secretLiteral("REVENUECAT_PUBLIC_SDK_KEY"))
+        buildConfigField("String", "APP_API_KEY", secretLiteral("APP_API_KEY"))
     }
 
     signingConfigs {
@@ -74,6 +93,7 @@ android {
     }
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 }
 
@@ -93,6 +113,7 @@ dependencies {
     implementation(libs.retrofit)
     implementation(libs.converter.gson)
     implementation(libs.gson)
+    implementation(libs.revenuecat.purchases)
     testImplementation(libs.junit)
     androidTestImplementation(platform(libs.androidx.compose.bom))
     androidTestImplementation(libs.androidx.compose.ui.test.junit4)

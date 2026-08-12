@@ -442,13 +442,19 @@ fun PebbleDialog(
     }
 }
 
-/** A selectable row inside a [PebbleDialog]: blue pebble when chosen. */
+/**
+ * A selectable row inside a [PebbleDialog]: blue pebble when chosen.
+ *
+ * [trailing] is an optional slot pinned to the right edge — used for the "PRO"
+ * badge on subscription-gated choices.
+ */
 @Composable
 fun PebbleOption(
     text: String,
     selected: Boolean,
     onClick: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    trailing: (@Composable () -> Unit)? = null
 ) {
     val tone = if (selected) PebbleTone.BLUE else PebbleTone.MUTED
     val contentColor = if (selected) Color.White else MaterialTheme.colorScheme.onSurface
@@ -460,14 +466,37 @@ fun PebbleOption(
         elevation = if (selected) 4.dp else 2.dp,
         contentAlignment = Alignment.CenterStart
     ) {
-        Text(
-            text = text,
-            modifier = Modifier.padding(horizontal = 16.dp, vertical = 13.dp),
-            style = MaterialTheme.typography.bodyLarge,
-            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
-            color = contentColor
-        )
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 13.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Text(
+                text = text,
+                modifier = Modifier.weight(1f),
+                style = MaterialTheme.typography.bodyLarge,
+                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+                color = contentColor
+            )
+            trailing?.invoke()
+        }
     }
+}
+
+/** The "PRO" pill that marks a subscription-gated choice. */
+@Composable
+fun ProBadge(modifier: Modifier = Modifier) {
+    Text(
+        text = "PRO",
+        modifier = modifier
+            .background(color = PebbleBlueDeep, shape = RoundedCornerShape(8.dp))
+            .padding(horizontal = 8.dp, vertical = 3.dp),
+        style = MaterialTheme.typography.labelSmall,
+        fontWeight = FontWeight.Bold,
+        color = Color.White
+    )
 }
 
 /** Flat text action for dialog footers. */

@@ -5,15 +5,35 @@ import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
+import java.util.UUID
 
 val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "love_preferences")
 
 class PreferencesRepository(private val context: Context) {
-    
+
+    companion object {
+        /**
+         * Mirrors the server's lifetime free allowance so the UI can render a
+         * sensible "N free left" before the first response comes back.
+         */
+        const val DEFAULT_FREE_LIMIT = 5
+
+        /**
+         * Process-wide cache of the install id, filled the first time it is
+         * read. Lets non-suspending callers — chiefly the OkHttp interceptor
+         * that stamps `X-App-User-Id` on every request — get the id without
+         * waiting on DataStore.
+         */
+        @Volatile
+        var cachedAppUserId: String? = null
+            private set
+    }
+
     private object PreferencesKeys {
         val STYLE = stringPreferencesKey("message_style")
         val TONE = stringPreferencesKey("message_tone")
@@ -27,8 +47,12 @@ class PreferencesRepository(private val context: Context) {
         val PROFILE_BIO = stringPreferencesKey("profile_bio")
         val PROFILE_PRONOUNS = stringPreferencesKey("profile_pronouns")
         val HAS_COMPLETED_ONBOARDING = booleanPreferencesKey("has_completed_onboarding")
+        val APP_USER_ID = stringPreferencesKey("app_user_id")
+        val IS_PRO = booleanPreferencesKey("is_pro")
+        val FREE_USED = intPreferencesKey("free_used")
+        val FREE_LIMIT = intPreferencesKey("free_limit")
     }
-    
+
     val userPreferencesFlow: Flow<UserPreferences> = context.dataStore.data.map { preferences ->
         UserPreferences(
             style = preferences[PreferencesKeys.STYLE]?.let { 
@@ -58,6 +82,56 @@ class PreferencesRepository(private val context: Context) {
         )
     }
     
+    /** The install id, once it exists. Null until [getOrCreateAppUserId] has run. */
+    val appUserIdFlow: Flow<String?> = context.dataStore.data.map { preferences ->
+        preferences[PreferencesKeys.APP_USER_ID]
+    }
+
+    /** Last known entitlement + free-allowance state, as told to us by the server. */
+    val entitlementFlow: Flow<EntitlementState> = context.dataStore.data.map { preferences ->
+        EntitlementState(
+            isPro = preferences[PreferencesKeys.IS_PRO] ?: false,
+            freeUsed = preferences[PreferencesKeys.FREE_USED] ?: 0,
+            freeLimit = preferences[PreferencesKeys.FREE_LIMIT] ?: DEFAULT_FREE_LIMIT
+        )
+    }
+
+    /**
+     * The stable per-install id sent as `X-App-User-Id` and used as the
+     * RevenueCat app user id. Generated exactly once, on first access, and kept
+     * for the life of the install — the server meters the free allowance by it,
+     * so it must never rotate.
+     */
+    suspend fun getOrCreateAppUserId(): String {
+        cachedAppUserId?.let { return it }
+
+        // edit() returns the snapshot *after* the transform, so a single
+        // read-modify-write both creates and reads the id without a race.
+        val updated = context.dataStore.edit { preferences ->
+            if (preferences[PreferencesKeys.APP_USER_ID].isNullOrBlank()) {
+                preferences[PreferencesKeys.APP_USER_ID] = UUID.randomUUID().toString()
+            }
+        }
+        val id = updated[PreferencesKeys.APP_USER_ID] ?: UUID.randomUUID().toString()
+        cachedAppUserId = id
+        return id
+    }
+
+    suspend fun updateEntitlement(state: EntitlementState) {
+        context.dataStore.edit { preferences ->
+            preferences[PreferencesKeys.IS_PRO] = state.isPro
+            preferences[PreferencesKeys.FREE_USED] = state.freeUsed
+            preferences[PreferencesKeys.FREE_LIMIT] = state.freeLimit
+        }
+    }
+
+    /** Entitlement-only update, for RevenueCat callbacks that know nothing about usage. */
+    suspend fun updateIsPro(isPro: Boolean) {
+        context.dataStore.edit { preferences ->
+            preferences[PreferencesKeys.IS_PRO] = isPro
+        }
+    }
+
     suspend fun updateStyle(style: MessageStyle) {
         context.dataStore.edit { preferences ->
             preferences[PreferencesKeys.STYLE] = style.name
@@ -135,7 +209,20 @@ class PreferencesRepository(private val context: Context) {
     
     suspend fun resetAllSettings() {
         context.dataStore.edit { preferences ->
+            // "Reset settings" resets *settings*. The install id and the
+            // allowance keyed to it deliberately survive: rotating them would
+            // hand the user a fresh batch of free generations.
+            val appUserId = preferences[PreferencesKeys.APP_USER_ID]
+            val isPro = preferences[PreferencesKeys.IS_PRO]
+            val freeUsed = preferences[PreferencesKeys.FREE_USED]
+            val freeLimit = preferences[PreferencesKeys.FREE_LIMIT]
+
             preferences.clear()
+
+            if (appUserId != null) preferences[PreferencesKeys.APP_USER_ID] = appUserId
+            if (isPro != null) preferences[PreferencesKeys.IS_PRO] = isPro
+            if (freeUsed != null) preferences[PreferencesKeys.FREE_USED] = freeUsed
+            if (freeLimit != null) preferences[PreferencesKeys.FREE_LIMIT] = freeLimit
         }
     }
 }
