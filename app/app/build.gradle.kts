@@ -97,6 +97,11 @@ android {
         sourceCompatibility = JavaVersion.VERSION_11
         targetCompatibility = JavaVersion.VERSION_11
     }
+    // Without this Kotlin targets whatever JVM the Gradle daemon runs on, which
+    // fails the JVM-target consistency check against the Java 11 above.
+    kotlinOptions {
+        jvmTarget = "11"
+    }
     buildFeatures {
         compose = true
         buildConfig = true

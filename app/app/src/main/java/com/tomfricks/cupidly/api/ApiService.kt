@@ -198,6 +198,9 @@ class ApiService(
         val message = when (code) {
             HTTP_BAD_REQUEST -> "Hook couldn't identify this install. Reopen the app and try again."
             HTTP_UNAUTHORIZED -> "Hook couldn't sign in to the server."
+            // The AI provider's per-minute budget, not a broken server — say so
+            // rather than showing a bare HTTP code.
+            HTTP_TOO_MANY_REQUESTS -> "Too many requests right now. Try again in a moment."
             else -> "Hook's server had a problem (HTTP $code)."
         }
         return GenerateRepliesResult.Failure(message, code)
@@ -251,8 +254,10 @@ class ApiService(
         if (this != null && this > 0) this else PreferencesRepository.DEFAULT_FREE_LIMIT
 
     private fun bitmapToBase64(bitmap: Bitmap): String {
-        // Scale down bitmap to max width 640px before compression to make upload instant (<60KB instead of 4MB)
-        val maxWidth = 640
+        // Scale down before compression to make upload instant (<60KB instead of 4MB).
+        // 512px also keeps the image's share of the Groq prompt-token budget down,
+        // which is what the per-minute rate limit is actually spent on.
+        val maxWidth = 512
         val scaledBitmap = if (bitmap.width > maxWidth) {
             val ratio = maxWidth.toFloat() / bitmap.width.toFloat()
             val newHeight = (bitmap.height * ratio).toInt()
@@ -262,7 +267,7 @@ class ApiService(
         }
 
         val outputStream = ByteArrayOutputStream()
-        scaledBitmap.compress(Bitmap.CompressFormat.JPEG, 70, outputStream)
+        scaledBitmap.compress(Bitmap.CompressFormat.JPEG, 60, outputStream)
         val byteArray = outputStream.toByteArray()
 
         if (scaledBitmap != bitmap) {
@@ -281,5 +286,6 @@ class ApiService(
         private const val HTTP_BAD_REQUEST = 400
         private const val HTTP_UNAUTHORIZED = 401
         private const val HTTP_PAYMENT_REQUIRED = 402
+        private const val HTTP_TOO_MANY_REQUESTS = 429
     }
 }

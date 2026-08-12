@@ -13,3 +13,7 @@
 .externalNativeBuild
 .cxx
 local.properties
+.kotlin
+# Signing keystores never belong in version control.
+*.jks
+*.keystore

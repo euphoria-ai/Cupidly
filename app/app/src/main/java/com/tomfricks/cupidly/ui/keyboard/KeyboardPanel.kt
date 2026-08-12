@@ -223,8 +223,8 @@ private fun AllowanceChip(
 @Composable
 private fun ScreenshotCard(
     isDarkTheme: Boolean,
-    content: (@Composable () -> Unit)?,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    content: (@Composable () -> Unit)? = null
 ) {
     val shape = RoundedCornerShape(16.dp)
     Box(
@@ -248,8 +248,7 @@ private fun ScreenshotCard(
         } else {
             Image(
                 painter = painterResource(
-                    id = if (isDarkTheme) R.drawable.heart_transparent
-                    else R.drawable.heart_transparent_light
+                    id = R.mipmap.ic_launcher_foreground
                 ),
                 contentDescription = "No screenshot yet",
                 contentScale = ContentScale.Fit,
@@ -464,8 +463,7 @@ private fun EmptyState(
         ) {
             Image(
                 painter = painterResource(
-                    id = if (isDarkTheme) R.drawable.heart_transparent
-                    else R.drawable.heart_transparent_light
+                    id = R.mipmap.ic_launcher_foreground
                 ),
                 contentDescription = "Hook",
                 contentScale = ContentScale.Fit,
