@@ -481,7 +481,9 @@ def _mock_revenuecat(monkeypatch, handler):
 
 
 def _subscriber(entitlement):
-    return {"subscriber": {"entitlements": {"pro": entitlement}}}
+    # Keyed off the configured id rather than a literal, so renaming the
+    # entitlement in the RevenueCat dashboard doesn't silently break these.
+    return {"subscriber": {"entitlements": {entitlements.ENTITLEMENT_ID: entitlement}}}
 
 
 async def test_entitlement_active_when_expiry_is_in_the_future(monkeypatch):

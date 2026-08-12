@@ -14,7 +14,7 @@ datastorePreferences = "1.1.1"
 retrofit = "2.11.0"
 gson = "2.11.0"
 kotlinxCoroutinesAndroid = "1.9.0"
-revenuecat = "9.11.0"
+revenuecat = "10.16.1"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }

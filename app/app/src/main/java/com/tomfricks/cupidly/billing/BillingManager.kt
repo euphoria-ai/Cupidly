@@ -77,7 +77,7 @@ object BillingManager {
      * Must match the identifier in the RevenueCat dashboard and the server's
      * `REVENUECAT_ENTITLEMENT_ID`. "Hook Pro" is only the display name.
      */
-    const val ENTITLEMENT_ID = "pro"
+    const val ENTITLEMENT_ID = "Hook Pro"
 
     /** Human-readable name for the thing [ENTITLEMENT_ID] unlocks. */
     const val PRO_DISPLAY_NAME = "Hook Pro"
@@ -145,7 +145,12 @@ object BillingManager {
             UpdatedCustomerInfoListener { customerInfo -> onCustomerInfo(customerInfo) }
 
         _isAvailable.value = true
-        refreshInBackground()
+
+        // Entitlement only — deliberately *not* offerings. This runs from
+        // Application.onCreate, and RevenueCat pre-fetches the offerings cache
+        // on its own; asking here just adds a network request at launch for a
+        // paywall the user may never open. PaywallScreen fetches on entry.
+        scope.launch { refreshCustomerInfo() }
     }
 
     /** Fire-and-forget refresh for callers that aren't in a coroutine (Activity.onResume). */
