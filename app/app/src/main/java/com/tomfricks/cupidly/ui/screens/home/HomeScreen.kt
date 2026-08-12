@@ -3,7 +3,6 @@ package com.tomfricks.cupidly.ui.screens.home
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -104,17 +103,10 @@ fun HomeScreen(
     ) {
         Spacer(modifier = Modifier.height(32.dp))
 
-        // App Icon - using theme-appropriate PNG
-        val isDarkTheme = when (currentPreferences.themeMode) {
-            ThemeMode.LIGHT -> false
-            ThemeMode.DARK -> true
-            ThemeMode.SYSTEM -> isSystemInDarkTheme()
-        }
-
+        // App Icon - same art as the launcher icon
         Image(
             painter = painterResource(
-                id = if (isDarkTheme) R.drawable.heart_transparent
-                else R.drawable.heart_transparent_light
+                id = R.mipmap.ic_launcher_foreground
             ),
             contentDescription = "Hook",
             modifier = Modifier.size(120.dp),

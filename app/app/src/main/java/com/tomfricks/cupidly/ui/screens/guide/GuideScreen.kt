@@ -2,7 +2,6 @@ package com.tomfricks.cupidly.ui.screens.guide
 
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
@@ -78,11 +77,9 @@ fun GuideScreen(
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             // Logo
-            val isDarkTheme = isSystemInDarkTheme()
             Image(
                 painter = painterResource(
-                    id = if (isDarkTheme) R.drawable.heart_transparent
-                    else R.drawable.heart_transparent_light
+                    id = R.mipmap.ic_launcher_foreground
                 ),
                 contentDescription = "Hook",
                 modifier = Modifier.size(100.dp),

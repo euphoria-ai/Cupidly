@@ -9,7 +9,6 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
@@ -158,8 +157,6 @@ fun OnboardingScreen(
 
 @Composable
 fun WelcomeSlide() {
-    val isDarkTheme = isSystemInDarkTheme()
-    
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -170,8 +167,7 @@ fun WelcomeSlide() {
         // Logo
         Image(
             painter = painterResource(
-                id = if (isDarkTheme) R.drawable.heart_transparent
-                     else R.drawable.heart_transparent_light
+                id = R.mipmap.ic_launcher_foreground
             ),
             contentDescription = "Hook",
             modifier = Modifier.size(120.dp)

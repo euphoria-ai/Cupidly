@@ -7,7 +7,7 @@ from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
-from openai import AsyncOpenAI
+from openai import AsyncOpenAI, RateLimitError
 import httpx
 from dotenv import load_dotenv
 import time
@@ -236,6 +236,23 @@ def strip_reasoning(text: str) -> str:
     return text.strip()
 
 
+def retry_after_seconds(err: Exception, default: int = 30) -> int:
+    """Seconds to wait after a Groq 429, from the header or the message text."""
+    header = getattr(getattr(err, "response", None), "headers", None)
+    if header:
+        raw = header.get("retry-after")
+        if raw:
+            try:
+                return max(1, int(float(raw)))
+            except ValueError:
+                pass
+    # Groq spells it out in the body: "Please try again in 21.225s."
+    match = re.search(r"try again in ([\d.]+)s", str(err))
+    if match:
+        return max(1, int(float(match.group(1))) + 1)
+    return default
+
+
 def build_context_block(context: Optional[ConversationContext]) -> str:
     """Render the prior context so the model can carry the conversation forward.
 
@@ -389,6 +406,15 @@ async def generate_replies(
                     break
                 else:
                     suggestions = []
+            except RateLimitError as e:
+                # Retrying only spends more of the very budget we just ran out
+                # of, so surface it straight away as a 429 the client can act on.
+                print(f"[ERR] {model}: rate limited: {e}")
+                raise HTTPException(
+                    status_code=429,
+                    detail="Rate limit reached. Try again in a moment.",
+                    headers={"Retry-After": str(retry_after_seconds(e))},
+                )
             except Exception as e:
                 print(f"[ERR] {model}: {e}")
                 last_error = e
