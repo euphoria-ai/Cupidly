@@ -1,7 +1,12 @@
 package com.tomfricks.cupidly.ui.theme
 
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
@@ -20,6 +25,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -331,6 +337,58 @@ fun IncomingBubble(
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurface
         )
+    }
+}
+
+/**
+ * An incoming-style "typing" bubble: three dots that pulse in sequence, shown
+ * at the bottom of the transcript while replies are being generated. Styled to
+ * match [IncomingBubble] so it reads as the AI "writing back".
+ */
+@Composable
+fun TypingBubble(
+    modifier: Modifier = Modifier
+) {
+    val dark = isPebbleDark
+    val transition = rememberInfiniteTransition(label = "typing")
+
+    Box(
+        modifier = modifier
+            .background(
+                color = if (dark) BubbleIncomingDark else BubbleIncomingLight,
+                shape = RoundedCornerShape(20.dp)
+            )
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
+            horizontalArrangement = Arrangement.spacedBy(5.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            repeat(3) { index ->
+                val dotAlpha by transition.animateFloat(
+                    initialValue = 0.25f,
+                    targetValue = 1f,
+                    animationSpec = infiniteRepeatable(
+                        animation = tween(
+                            durationMillis = 600,
+                            delayMillis = index * 160,
+                            easing = LinearEasing
+                        ),
+                        repeatMode = RepeatMode.Reverse
+                    ),
+                    label = "typing_dot_$index"
+                )
+                Box(
+                    modifier = Modifier
+                        .size(8.dp)
+                        .alpha(dotAlpha)
+                        .background(
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                            shape = CircleShape
+                        )
+                )
+            }
+        }
     }
 }
 
