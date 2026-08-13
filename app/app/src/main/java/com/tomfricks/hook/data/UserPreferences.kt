@@ -12,6 +12,11 @@ data class UserPreferences(
     val profileSexuality: String = "",
     val profileBio: String = "",
     val profilePronouns: String = "",
+    // Asked during onboarding. Free-form strings like the rest of the profile,
+    // holding the answer as the user read it ("18-24", "Fun & hookups") so it
+    // can go straight into a prompt without a lookup table.
+    val profileAgeRange: String = "",
+    val profileLookingFor: String = "",
     val hasCompletedOnboarding: Boolean = false
 )
 

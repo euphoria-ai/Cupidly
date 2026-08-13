@@ -31,10 +31,27 @@ import com.tomfricks.hook.ui.theme.HookTheme
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
 class HookKeyboardService : InputMethodService(), LifecycleOwner {
+
+    companion object {
+        private val _isShowing = MutableStateFlow(false)
+
+        /**
+         * True while this keyboard is the one on screen.
+         *
+         * The IME and the app share a process, so the onboarding demo can watch
+         * this to know the user has actually switched to Hook — which is the one
+         * thing it can't ask Android about, since the switch happens without
+         * ever leaving our activity.
+         */
+        val isShowing: StateFlow<Boolean> = _isShowing.asStateFlow()
+    }
 
     private lateinit var preferencesRepository: PreferencesRepository
     private var apiService: ApiService? = null
@@ -125,6 +142,7 @@ class HookKeyboardService : InputMethodService(), LifecycleOwner {
 
     override fun onStartInputView(info: EditorInfo?, restarting: Boolean) {
         super.onStartInputView(info, restarting)
+        _isShowing.value = true
 
         // Typical flow: screenshot the chat, *then* open the keyboard. Anything
         // generated in the meantime is kept; only a stale round is dropped.
@@ -140,11 +158,13 @@ class HookKeyboardService : InputMethodService(), LifecycleOwner {
 
     override fun onFinishInputView(finishingInput: Boolean) {
         super.onFinishInputView(finishingInput)
+        _isShowing.value = false
         // Don't pause here as the view might be reused
     }
 
     override fun onDestroy() {
         super.onDestroy()
+        _isShowing.value = false
         lifecycleOwner.onDestroy()
         stopScreenshotService()
     }

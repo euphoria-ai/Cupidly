@@ -41,6 +41,11 @@ interface HookApiInterface {
     // answer first. No body — the identity is in the auth headers.
     @POST("/entitlement/refresh")
     suspend fun refreshEntitlement(): Response<MeResponse>
+
+    // 204, no body: the app has nothing to do with the answer beyond knowing
+    // it landed.
+    @POST("/onboarding")
+    suspend fun submitOnboarding(@Body request: OnboardingProfileRequest): Response<Unit>
 }
 
 /** Suggestions, the updated hidden conversation context, and what's left of the allowance. */
@@ -176,6 +181,33 @@ class ApiService(
         // reads to the user as "no connection", because that's what it is.
         is IOException -> ReplyError.NO_CONNECTION
         else -> ReplyError.SERVER
+    }
+
+    /**
+     * Send the finished onboarding profile. Called once, after the last screen.
+     *
+     * Failure is not the user's problem — they have finished onboarding either
+     * way — so this only reports whether to stop retrying, and the caller keeps
+     * the "not yet sent" flag until it returns true.
+     */
+    suspend fun submitOnboarding(
+        profile: OnboardingProfileRequest
+    ): Boolean = withContext(Dispatchers.IO) {
+        try {
+            val response = api.submitOnboarding(profile)
+            if (!response.isSuccessful) {
+                logHttpError(response.code(), "POST /onboarding")
+                // 4xx means this body will never be accepted; retrying it every
+                // launch would just be noise. 5xx and network errors are worth
+                // another go later.
+                return@withContext response.code() in 400..499
+            }
+            Log.d(TAG, "Onboarding profile sent")
+            true
+        } catch (e: Exception) {
+            Log.w(TAG, "Could not send the onboarding profile; will retry", e)
+            false
+        }
     }
 
     /**

@@ -46,7 +46,11 @@ class PreferencesRepository(private val context: Context) {
         val PROFILE_SEXUALITY = stringPreferencesKey("profile_sexuality")
         val PROFILE_BIO = stringPreferencesKey("profile_bio")
         val PROFILE_PRONOUNS = stringPreferencesKey("profile_pronouns")
+        val PROFILE_AGE_RANGE = stringPreferencesKey("profile_age_range")
+        val PROFILE_LOOKING_FOR = stringPreferencesKey("profile_looking_for")
         val HAS_COMPLETED_ONBOARDING = booleanPreferencesKey("has_completed_onboarding")
+        val ONBOARDING_CHECKPOINT = stringPreferencesKey("onboarding_checkpoint")
+        val ONBOARDING_SYNCED = booleanPreferencesKey("onboarding_synced")
         val APP_USER_ID = stringPreferencesKey("app_user_id")
         val IS_PRO = booleanPreferencesKey("is_pro")
         val FREE_USED = intPreferencesKey("free_used")
@@ -78,10 +82,29 @@ class PreferencesRepository(private val context: Context) {
             profileSexuality = preferences[PreferencesKeys.PROFILE_SEXUALITY] ?: "",
             profileBio = preferences[PreferencesKeys.PROFILE_BIO] ?: "",
             profilePronouns = preferences[PreferencesKeys.PROFILE_PRONOUNS] ?: "",
+            profileAgeRange = preferences[PreferencesKeys.PROFILE_AGE_RANGE] ?: "",
+            profileLookingFor = preferences[PreferencesKeys.PROFILE_LOOKING_FOR] ?: "",
             hasCompletedOnboarding = preferences[PreferencesKeys.HAS_COMPLETED_ONBOARDING] ?: false
         )
     }
     
+    /**
+     * The furthest checkpoint onboarding has reached, or null if none.
+     *
+     * Onboarding is long and hands the user off to other apps twice, so the
+     * milestones that can't be repeated — the live demo, and the applause after
+     * it — record themselves here. A relaunch resumes from the last one instead
+     * of starting the whole thing again.
+     */
+    val onboardingCheckpointFlow: Flow<String?> = context.dataStore.data.map { preferences ->
+        preferences[PreferencesKeys.ONBOARDING_CHECKPOINT]
+    }
+
+    /** True once the finished onboarding profile has reached the server. */
+    val onboardingSyncedFlow: Flow<Boolean> = context.dataStore.data.map { preferences ->
+        preferences[PreferencesKeys.ONBOARDING_SYNCED] ?: false
+    }
+
     /** The install id, once it exists. Null until [getOrCreateAppUserId] has run. */
     val appUserIdFlow: Flow<String?> = context.dataStore.data.map { preferences ->
         preferences[PreferencesKeys.APP_USER_ID]
@@ -184,9 +207,60 @@ class PreferencesRepository(private val context: Context) {
         }
     }
     
+    /**
+     * Write everything onboarding has learned so far, in one edit.
+     *
+     * Called on each step rather than once at the end: the flow sends the user
+     * out to system settings partway through, which is exactly where people
+     * don't come back, and answers already given shouldn't die with the trip.
+     * Each write carries the whole map, so there is no partial-update ordering
+     * to get wrong.
+     *
+     * Blank answers are skipped — an unasked question must never clear one the
+     * user set elsewhere.
+     */
+    suspend fun updateOnboardingAnswers(answers: Map<OnboardingField, String>) {
+        context.dataStore.edit { preferences ->
+            answers.forEach { (field, answer) ->
+                if (answer.isNotBlank()) preferences[field.key()] = answer
+            }
+        }
+    }
+
+    /**
+     * Settings answers arrive as enum names and the settings keys hold enum
+     * names, so every field maps onto a plain string key.
+     */
+    private fun OnboardingField.key() = when (this) {
+        OnboardingField.GENDER -> PreferencesKeys.PROFILE_GENDER
+        OnboardingField.SEXUALITY -> PreferencesKeys.PROFILE_SEXUALITY
+        OnboardingField.AGE_RANGE -> PreferencesKeys.PROFILE_AGE_RANGE
+        OnboardingField.LOOKING_FOR -> PreferencesKeys.PROFILE_LOOKING_FOR
+        OnboardingField.STYLE -> PreferencesKeys.STYLE
+        OnboardingField.TONE -> PreferencesKeys.TONE
+        OnboardingField.FLIRT_LEVEL -> PreferencesKeys.FLIRT_LEVEL
+    }
+
+    /** Remember a point the user should never be sent back before. */
+    suspend fun setOnboardingCheckpoint(checkpoint: String) {
+        context.dataStore.edit { preferences ->
+            preferences[PreferencesKeys.ONBOARDING_CHECKPOINT] = checkpoint
+        }
+    }
+
     suspend fun setOnboardingCompleted() {
         context.dataStore.edit { preferences ->
             preferences[PreferencesKeys.HAS_COMPLETED_ONBOARDING] = true
+            // Nothing left to resume; the flag above is what keeps the flow from
+            // ever being shown again.
+            preferences.remove(PreferencesKeys.ONBOARDING_CHECKPOINT)
+        }
+    }
+
+    /** The finished profile is on the server; don't send it again. */
+    suspend fun setOnboardingSynced() {
+        context.dataStore.edit { preferences ->
+            preferences[PreferencesKeys.ONBOARDING_SYNCED] = true
         }
     }
     
@@ -203,6 +277,8 @@ class PreferencesRepository(private val context: Context) {
             preferences[PreferencesKeys.PROFILE_SEXUALITY] = userPreferences.profileSexuality
             preferences[PreferencesKeys.PROFILE_BIO] = userPreferences.profileBio
             preferences[PreferencesKeys.PROFILE_PRONOUNS] = userPreferences.profilePronouns
+            preferences[PreferencesKeys.PROFILE_AGE_RANGE] = userPreferences.profileAgeRange
+            preferences[PreferencesKeys.PROFILE_LOOKING_FOR] = userPreferences.profileLookingFor
             preferences[PreferencesKeys.HAS_COMPLETED_ONBOARDING] = userPreferences.hasCompletedOnboarding
         }
     }
