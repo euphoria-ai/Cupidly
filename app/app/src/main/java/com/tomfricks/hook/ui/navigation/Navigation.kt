@@ -16,8 +16,11 @@ import com.tomfricks.hook.ui.screens.home.HomeScreen
 import com.tomfricks.hook.ui.screens.onboarding.OnboardingScreen
 import com.tomfricks.hook.ui.screens.paywall.PaywallScreen
 import com.tomfricks.hook.ui.screens.subscription.CustomerCenterScreen
+import com.tomfricks.hook.ui.screens.welcome.WelcomeCarousel
 
 sealed class Screen(val route: String) {
+    /** The three pitch slides shown before any setup is asked for. */
+    object Welcome : Screen("welcome")
     object Onboarding : Screen("onboarding")
     object Home : Screen("home")
     object Guide : Screen("guide")
@@ -44,10 +47,13 @@ fun HookNavigation(paywallRequest: Int = 0) {
 
     val navController = rememberNavController()
 
+    // First run opens on the pitch, not on a permission request: Welcome ->
+    // Onboarding -> Home. Only Onboarding marks the flow complete, so quitting
+    // mid-carousel starts over rather than skipping setup.
     val startDestination = if (userPreferences.hasCompletedOnboarding) {
         Screen.Home.route
     } else {
-        Screen.Onboarding.route
+        Screen.Welcome.route
     }
 
     LaunchedEffect(paywallRequest) {
@@ -60,6 +66,16 @@ fun HookNavigation(paywallRequest: Int = 0) {
         navController = navController,
         startDestination = startDestination
     ) {
+        composable(Screen.Welcome.route) {
+            WelcomeCarousel(
+                onFinished = {
+                    navController.navigate(Screen.Onboarding.route) {
+                        popUpTo(Screen.Welcome.route) { inclusive = true }
+                    }
+                }
+            )
+        }
+
         composable(Screen.Onboarding.route) {
             OnboardingScreen(
                 onComplete = {
