@@ -36,7 +36,6 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -56,6 +55,7 @@ import com.revenuecat.purchases.ui.revenuecatui.Paywall
 import com.revenuecat.purchases.ui.revenuecatui.PaywallListener
 import com.revenuecat.purchases.ui.revenuecatui.PaywallOptions
 import com.tomfricks.cupidly.billing.BillingManager
+import com.tomfricks.cupidly.billing.BillingOperation
 import com.tomfricks.cupidly.billing.OfferingsState
 import com.tomfricks.cupidly.billing.PurchaseResult
 import com.tomfricks.cupidly.ui.theme.PebbleButton
@@ -64,7 +64,6 @@ import com.tomfricks.cupidly.ui.theme.PebbleSurface
 import com.tomfricks.cupidly.ui.theme.PebbleTextButton
 import com.tomfricks.cupidly.ui.theme.PebbleTone
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 
 private const val TERMS_URL = "https://cupidly.app/terms"
@@ -93,7 +92,12 @@ fun PaywallScreen(
     val isAvailable by BillingManager.isAvailable.collectAsState()
     val offeringsState by BillingManager.offeringsState.collectAsState()
 
-    LaunchedEffect(Unit) {
+    // Keyed on isAvailable, not Unit: on a cold start the SDK is still being
+    // configured when this screen composes, both refreshes no-op, and the
+    // offerings would sit at Idle forever — a spinner with nothing behind it.
+    // Re-running once the SDK is up is what gets the plans on screen.
+    LaunchedEffect(isAvailable) {
+        if (!isAvailable) return@LaunchedEffect
         BillingManager.refreshCustomerInfo()
         BillingManager.refreshOfferings()
     }
@@ -108,7 +112,7 @@ fun PaywallScreen(
         !isAvailable -> FallbackPaywall(onNavigateBack = onNavigateBack)
 
         offeringsState is OfferingsState.Idle || offeringsState is OfferingsState.Loading ->
-            PaywallLoading()
+            PaywallLoading(onNavigateBack = onNavigateBack)
 
         hostedOffering != null -> HostedPaywall(
             offering = hostedOffering,
@@ -157,14 +161,29 @@ private fun HostedPaywall(
 }
 
 @Composable
-private fun PaywallLoading() {
+private fun PaywallLoading(onNavigateBack: () -> Unit) {
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(MaterialTheme.colorScheme.background),
-        contentAlignment = Alignment.Center
+            .background(MaterialTheme.colorScheme.background)
     ) {
-        CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
+        // A spinner is never allowed to be a dead end, however briefly.
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 24.dp, vertical = 16.dp),
+            horizontalArrangement = Arrangement.Start
+        ) {
+            PebbleIconButton(
+                icon = Icons.Default.Close,
+                contentDescription = "Close",
+                onClick = onNavigateBack
+            )
+        }
+        CircularProgressIndicator(
+            color = MaterialTheme.colorScheme.primary,
+            modifier = Modifier.align(Alignment.Center)
+        )
     }
 }
 
@@ -182,15 +201,38 @@ private fun FallbackPaywall(
     val context = LocalContext.current
     val activity = remember(context) { context.findActivity() }
     val uriHandler = LocalUriHandler.current
-    val coroutineScope = rememberCoroutineScope()
 
     val isPro by BillingManager.isPro.collectAsState()
     val offeringsState by BillingManager.offeringsState.collectAsState()
     val isAvailable by BillingManager.isAvailable.collectAsState()
 
+    // Both owned by the BillingManager singleton rather than this composition,
+    // so a purchase that outlives an Activity recreation still reports back.
+    val isWorking by BillingManager.purchaseInFlight.collectAsState()
+    val outcome by BillingManager.lastOutcome.collectAsState()
+
     var selectedPackage by remember { mutableStateOf<Package?>(null) }
-    var isWorking by remember { mutableStateOf(false) }
     var statusMessage by remember { mutableStateOf<String?>(null) }
+
+    // The guarantee: whatever happened, and whether or not this screen was alive
+    // when it happened, the user is told about it.
+    LaunchedEffect(outcome) {
+        val finished = outcome ?: return@LaunchedEffect
+        statusMessage = when (val result = finished.result) {
+            is PurchaseResult.Success -> when (finished.operation) {
+                BillingOperation.PURCHASE ->
+                    "You're on ${BillingManager.PRO_DISPLAY_NAME}. Enjoy."
+
+                BillingOperation.RESTORE ->
+                    "${BillingManager.PRO_DISPLAY_NAME} restored."
+            }
+            // Backing out of the Play sheet is a choice, not a failure. Say
+            // nothing at all rather than showing an error for it.
+            is PurchaseResult.Cancelled -> null
+            is PurchaseResult.Failed -> result.message
+        }
+        BillingManager.consumeOutcome()
+    }
 
     val isLoadingOfferings =
         offeringsState is OfferingsState.Idle || offeringsState is OfferingsState.Loading
@@ -223,7 +265,6 @@ private fun FallbackPaywall(
     val wasProOnEntry = remember { isPro }
     LaunchedEffect(isPro) {
         if (isPro && !wasProOnEntry) {
-            isWorking = false
             statusMessage = "You're on ${BillingManager.PRO_DISPLAY_NAME}. Enjoy."
         }
     }
@@ -354,18 +395,10 @@ private fun FallbackPaywall(
                             statusMessage = "Couldn't start the purchase. Try again."
                             return@PebbleButton
                         }
-                        isWorking = true
                         statusMessage = null
-                        coroutineScope.launch {
-                            val result = BillingManager.purchase(activity, chosen)
-                            isWorking = false
-                            statusMessage = when (result) {
-                                is PurchaseResult.Success ->
-                                    "You're on ${BillingManager.PRO_DISPLAY_NAME}. Enjoy."
-                                is PurchaseResult.Cancelled -> null
-                                is PurchaseResult.Failed -> result.message
-                            }
-                        }
+                        // Deliberately not launched from a composition scope —
+                        // see BillingManager.startPurchase.
+                        BillingManager.startPurchase(activity, chosen)
                     }
                 )
             }
@@ -401,22 +434,15 @@ private fun FallbackPaywall(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.Center
         ) {
+            // The recovery route for anyone who already paid — reachable
+            // whatever else on this screen went wrong, including while a
+            // purchase is still resolving.
             PebbleTextButton(
-                text = "Restore purchases",
+                text = if (isWorking) "Working…" else "Restore purchases",
                 onClick = {
                     if (isWorking) return@PebbleTextButton
-                    isWorking = true
                     statusMessage = null
-                    coroutineScope.launch {
-                        val result = BillingManager.restorePurchases()
-                        isWorking = false
-                        statusMessage = when (result) {
-                            is PurchaseResult.Success ->
-                                "${BillingManager.PRO_DISPLAY_NAME} restored."
-                            is PurchaseResult.Cancelled -> null
-                            is PurchaseResult.Failed -> result.message
-                        }
-                    }
+                    BillingManager.startRestore()
                 }
             )
         }

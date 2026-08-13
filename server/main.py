@@ -12,7 +12,7 @@ import httpx
 from dotenv import load_dotenv
 import time
 
-from entitlements import is_pro
+from entitlements import invalidate, is_pro
 from store import get_store
 
 load_dotenv()
@@ -296,12 +296,8 @@ async def root():
     return {"status": "online", "service": "Cupidly", "version": APP_VERSION}
 
 
-@app.get("/me", response_model=MeResponse)
-async def me(app_user_id: str = Depends(authenticate)):
-    """Entitlement + free-allowance state for one install.
-
-    The app calls this on launch and after a purchase to refresh its paywall.
-    """
+async def _entitlement_snapshot(app_user_id: str) -> MeResponse:
+    """Current entitlement + allowance for one install."""
     pro = await is_pro(app_user_id)
     free_used = await store.get_used(app_user_id)
     return MeResponse(
@@ -311,6 +307,30 @@ async def me(app_user_id: str = Depends(authenticate)):
         free_limit=FREE_GENERATION_LIMIT,
         remaining=_remaining(free_used),
     )
+
+
+@app.get("/me", response_model=MeResponse)
+async def me(app_user_id: str = Depends(authenticate)):
+    """Entitlement + free-allowance state for one install.
+
+    The app calls this on launch and after a purchase to refresh its paywall.
+    """
+    return await _entitlement_snapshot(app_user_id)
+
+
+@app.post("/entitlement/refresh", response_model=MeResponse)
+async def refresh_entitlement(app_user_id: str = Depends(authenticate)):
+    """Same answer as /me, but re-asks RevenueCat instead of trusting the cache.
+
+    The app calls this the moment a purchase grants Pro. Without it the cached
+    "not Pro" answer from a second earlier keeps standing for the rest of the
+    TTL, and /generate-replies hands a 402 to someone who has just paid.
+
+    Same auth as every other metered route — this only drops our own cache, it
+    never lets the client assert its own entitlement.
+    """
+    invalidate(app_user_id)
+    return await _entitlement_snapshot(app_user_id)
 
 
 @app.post(

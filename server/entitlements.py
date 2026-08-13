@@ -55,6 +55,17 @@ def clear_cache() -> None:
     _cache.clear()
 
 
+def invalidate(app_user_id: str) -> None:
+    """Forget one install's cached answer so the next is_pro() re-asks RevenueCat.
+
+    The cache is what makes a fresh purchase invisible for up to the TTL: the
+    client has just paid, RevenueCat knows it, and we would still be serving the
+    "not Pro" answer we remembered a few seconds earlier — and 402-ing them.
+    """
+    if app_user_id:
+        _cache.pop(app_user_id, None)
+
+
 async def _get_client() -> httpx.AsyncClient:
     """One shared client so the TLS handshake to RevenueCat is paid once."""
     global _client
