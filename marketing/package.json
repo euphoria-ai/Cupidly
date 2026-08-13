@@ -1,0 +1,28 @@
+{
+  "name": "hook-marketing",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Remotion compositions for Hook (@cupidly) Instagram Reels",
+  "scripts": {
+    "dev": "remotion studio",
+    "studio": "remotion studio",
+    "render:screenshot": "remotion render ScreenshotReel out/hook-screenshot.mp4",
+    "render:dry": "remotion render DryTexterReel out/hook-dry-texter.mp4",
+    "render:how": "remotion render HowItWorksReel out/hook-how-it-works.mp4",
+    "render:all": "npm run render:screenshot && npm run render:dry && npm run render:how",
+    "still:cover": "remotion still ScreenshotReel out/cover.png --frame=40",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@remotion/cli": "^4.0.0",
+    "@remotion/google-fonts": "^4.0.0",
+    "react": "18.3.1",
+    "react-dom": "18.3.1",
+    "remotion": "^4.0.0"
+  },
+  "devDependencies": {
+    "@types/react": "18.3.12",
+    "@types/react-dom": "18.3.1",
+    "typescript": "5.6.3"
+  }
+}
