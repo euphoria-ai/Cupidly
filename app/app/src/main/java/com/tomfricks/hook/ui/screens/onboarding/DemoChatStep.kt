@@ -34,7 +34,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -47,13 +46,13 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.tomfricks.hook.keyboard.ConversationSession
-import com.tomfricks.hook.keyboard.HookKeyboardService
 import com.tomfricks.hook.keyboard.RizzSession
 import com.tomfricks.hook.utils.PermissionUtils
 import kotlinx.coroutines.delay
@@ -80,7 +79,8 @@ fun DemoChatStep(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
-    val keyboardShowing by HookKeyboardService.isShowing.collectAsState()
+    val setup = rememberKeyboardSetup()
+    val keyboardController = LocalSoftwareKeyboardController.current
 
     var messages by remember { mutableStateOf(DemoThread) }
     var draft by remember { mutableStateOf("") }
@@ -94,11 +94,26 @@ fun DemoChatStep(
     LaunchedEffect(Unit) {
         RizzSession.reset()
         ConversationSession.reset()
-        focusRequester.requestFocus()
+    }
+
+    // Keep asking for the keyboard until it is actually up.
+    //
+    // Focus alone doesn't reliably raise the IME — and this screen *needs* it
+    // up, because "tap and hold the globe key" is impossible with no keyboard
+    // on screen. That was the dead end: no keyboard to switch from, a scrim
+    // that only lifts once Hook appears, and nothing else tappable.
+    LaunchedEffect(setup.showing) {
+        while (!setup.showing) {
+            runCatching { focusRequester.requestFocus() }
+            keyboardController?.show()
+            delay(600)
+        }
     }
 
     val phase = when {
-        !keyboardShowing -> DemoPhase.SWITCH_KEYBOARD
+        // Waiting on Hook being *chosen*, not on its view being up: whether the
+        // keyboard is on screen at this instant depends on what has focus.
+        !setup.isHooksTurn -> DemoPhase.SWITCH_KEYBOARD
         sent -> DemoPhase.SENT
         draft.isNotBlank() -> DemoPhase.SEND_IT
         RizzSession.hasPendingSuggestions -> DemoPhase.PICK_REPLY
@@ -116,7 +131,7 @@ fun DemoChatStep(
     // can do anything about, and none of which should end their onboarding.
     var showSkip by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) {
-        delay(25_000)
+        delay(15_000)
         showSkip = true
     }
     val stuck = showSkip || RizzSession.error != null || RizzSession.paywallRequired
@@ -194,7 +209,20 @@ fun DemoChatStep(
             enter = fadeIn(),
             exit = fadeOut()
         ) {
-            SwitchKeyboardScrim(onOpenPicker = { PermissionUtils.showKeyboardPicker(context) })
+            SwitchKeyboardScrim(
+                onOpenPicker = { PermissionUtils.showKeyboardPicker(context) },
+                // The skip below the composer is behind this scrim, so it was
+                // no use to anyone stuck here. This one is reachable.
+                onSkip = if (stuck) {
+                    {
+                        RizzSession.reset()
+                        ConversationSession.reset()
+                        onFinished()
+                    }
+                } else {
+                    null
+                }
+            )
         }
     }
 }
@@ -240,7 +268,10 @@ private fun Coach(phase: DemoPhase) {
  * reliable way to do it on Android, since the globe key isn't on every keyboard.
  */
 @Composable
-private fun SwitchKeyboardScrim(onOpenPicker: () -> Unit) {
+private fun SwitchKeyboardScrim(
+    onOpenPicker: () -> Unit,
+    onSkip: (() -> Unit)?
+) {
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -268,7 +299,9 @@ private fun SwitchKeyboardScrim(onOpenPicker: () -> Unit) {
             Spacer(modifier = Modifier.height(12.dp))
 
             Text(
-                text = "Tap and hold the 🌐 key, or the space bar, and pick Hook.",
+                text = "Tap the button below and pick Hook from the list. " +
+                    "You can also tap and hold the 🌐 key or the space bar on " +
+                    "your keyboard.",
                 style = TextStyle(fontSize = 15.sp),
                 color = Color.White.copy(alpha = 0.8f),
                 textAlign = TextAlign.Center
@@ -308,6 +341,19 @@ private fun SwitchKeyboardScrim(onOpenPicker: () -> Unit) {
                     .clickable(onClick = onOpenPicker)
                     .padding(horizontal = 28.dp, vertical = 14.dp)
             )
+
+            if (onSkip != null) {
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    text = "Skip this for now",
+                    style = TextStyle(fontSize = 15.sp, fontWeight = FontWeight.SemiBold),
+                    color = Color.White.copy(alpha = 0.85f),
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(14.dp))
+                        .clickable(onClick = onSkip)
+                        .padding(horizontal = 20.dp, vertical = 12.dp)
+                )
+            }
         }
     }
 }
