@@ -1,12 +1,43 @@
 package com.tomfricks.hook.utils
 
+import android.Manifest
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
+import android.os.Build
 import android.provider.Settings
 import android.view.inputmethod.InputMethodManager
+import androidx.core.content.ContextCompat
 
 object PermissionUtils {
-    
+
+    /**
+     * The permission that lets Hook read the screenshot the user just took.
+     *
+     * Android 13 split media out of storage; below that, images come with the
+     * broad storage permission.
+     */
+    val photoPermission: String
+        get() = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            Manifest.permission.READ_MEDIA_IMAGES
+        } else {
+            Manifest.permission.READ_EXTERNAL_STORAGE
+        }
+
+    /** True once Hook can read screenshots — without it, detection sees nothing. */
+    fun hasPhotoAccess(context: Context): Boolean =
+        ContextCompat.checkSelfPermission(context, photoPermission) ==
+            PackageManager.PERMISSION_GRANTED
+
+    /** Hook's own entry in the system app-settings screen. */
+    fun openAppSettings(context: Context) {
+        val intent = Intent(
+            Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+            android.net.Uri.fromParts("package", context.packageName, null)
+        ).apply { addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) }
+        context.startActivity(intent)
+    }
+
     /**
      * Check if Hook keyboard is enabled in system settings
      */

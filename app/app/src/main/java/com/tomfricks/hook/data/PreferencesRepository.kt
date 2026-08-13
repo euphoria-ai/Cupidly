@@ -189,13 +189,18 @@ class PreferencesRepository(private val context: Context) {
     }
     
     /**
-     * Store the onboarding survey's answers in one write, so a half-saved
-     * profile can't survive the app being killed mid-flow.
+     * Write everything onboarding has learned so far, in one edit.
      *
-     * Only non-blank answers are written: a question the flow doesn't ask yet
-     * must not wipe an answer given somewhere else.
+     * Called on each step rather than once at the end: the flow sends the user
+     * out to system settings partway through, which is exactly where people
+     * don't come back, and answers already given shouldn't die with the trip.
+     * Each write carries the whole map, so there is no partial-update ordering
+     * to get wrong.
+     *
+     * Blank answers are skipped — an unasked question must never clear one the
+     * user set elsewhere.
      */
-    suspend fun updateOnboardingProfile(answers: Map<ProfileField, String>) {
+    suspend fun updateOnboardingAnswers(answers: Map<OnboardingField, String>) {
         context.dataStore.edit { preferences ->
             answers.forEach { (field, answer) ->
                 if (answer.isNotBlank()) preferences[field.key()] = answer
@@ -203,11 +208,18 @@ class PreferencesRepository(private val context: Context) {
         }
     }
 
-    private fun ProfileField.key() = when (this) {
-        ProfileField.GENDER -> PreferencesKeys.PROFILE_GENDER
-        ProfileField.SEXUALITY -> PreferencesKeys.PROFILE_SEXUALITY
-        ProfileField.AGE_RANGE -> PreferencesKeys.PROFILE_AGE_RANGE
-        ProfileField.LOOKING_FOR -> PreferencesKeys.PROFILE_LOOKING_FOR
+    /**
+     * Settings answers arrive as enum names and the settings keys hold enum
+     * names, so every field maps onto a plain string key.
+     */
+    private fun OnboardingField.key() = when (this) {
+        OnboardingField.GENDER -> PreferencesKeys.PROFILE_GENDER
+        OnboardingField.SEXUALITY -> PreferencesKeys.PROFILE_SEXUALITY
+        OnboardingField.AGE_RANGE -> PreferencesKeys.PROFILE_AGE_RANGE
+        OnboardingField.LOOKING_FOR -> PreferencesKeys.PROFILE_LOOKING_FOR
+        OnboardingField.STYLE -> PreferencesKeys.STYLE
+        OnboardingField.TONE -> PreferencesKeys.TONE
+        OnboardingField.FLIRT_LEVEL -> PreferencesKeys.FLIRT_LEVEL
     }
 
     suspend fun setOnboardingCompleted() {

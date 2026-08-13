@@ -13,8 +13,7 @@ import com.tomfricks.hook.billing.BillingManager
 import com.tomfricks.hook.ui.screens.demo.DemoScreen
 import com.tomfricks.hook.ui.screens.guide.GuideScreen
 import com.tomfricks.hook.ui.screens.home.HomeScreen
-import com.tomfricks.hook.ui.screens.onboarding.OnboardingScreen
-import com.tomfricks.hook.ui.screens.onboarding.OnboardingSurvey
+import com.tomfricks.hook.ui.screens.onboarding.OnboardingFlow
 import com.tomfricks.hook.ui.screens.paywall.PaywallScreen
 import com.tomfricks.hook.ui.screens.subscription.CustomerCenterScreen
 import com.tomfricks.hook.ui.screens.welcome.WelcomeCarousel
@@ -23,8 +22,7 @@ sealed class Screen(val route: String) {
     /** The three pitch slides shown before any setup is asked for. */
     object Welcome : Screen("welcome")
 
-    /** The profile questions — gender, sexuality, age, what they're after. */
-    object Survey : Screen("survey")
+    /** Everything from the profile questions to the keyboard being ready. */
     object Onboarding : Screen("onboarding")
     object Home : Screen("home")
     object Guide : Screen("guide")
@@ -72,34 +70,24 @@ fun HookNavigation(paywallRequest: Int = 0) {
     ) {
         composable(Screen.Welcome.route) {
             WelcomeCarousel(
-                onFinished = { navController.navigate(Screen.Survey.route) }
-            )
-        }
-
-        composable(Screen.Survey.route) {
-            OnboardingSurvey(
-                onFinished = {
-                    navController.navigate(Screen.Onboarding.route) {
-                        // The survey is answered and saved; going "back" into it
-                        // from the keyboard step would only re-ask.
-                        popUpTo(Screen.Welcome.route) { inclusive = true }
-                    }
-                },
-                // Back out of the first question and you're on the last slide
-                // again, which is where you came from.
-                onBackFromStart = { navController.popBackStack() },
-                preferencesRepository = preferencesRepository
+                onFinished = { navController.navigate(Screen.Onboarding.route) }
             )
         }
 
         composable(Screen.Onboarding.route) {
-            OnboardingScreen(
+            OnboardingFlow(
                 onComplete = {
                     navController.navigate(Screen.Home.route) {
-                        popUpTo(Screen.Onboarding.route) { inclusive = true }
+                        // Onboarding is recorded as done; there is nothing to
+                        // come back to.
+                        popUpTo(Screen.Welcome.route) { inclusive = true }
                     }
                 },
-                preferencesRepository = preferencesRepository
+                // Back out of the first question and you're on the last pitch
+                // slide again, which is where you came from.
+                onBackFromStart = { navController.popBackStack() },
+                preferencesRepository = preferencesRepository,
+                isPro = isPro
             )
         }
 
