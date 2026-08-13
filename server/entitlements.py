@@ -55,6 +55,17 @@ def clear_cache() -> None:
     _cache.clear()
 
 
+def invalidate(app_user_id: str) -> None:
+    """Forget one install's cached answer so the next is_pro() re-asks RevenueCat.
+
+    The cache is what makes a fresh purchase invisible for up to the TTL: the
+    client has just paid, RevenueCat knows it, and we would still be serving the
+    "not Pro" answer we remembered a few seconds earlier — and 402-ing them.
+    """
+    if app_user_id:
+        _cache.pop(app_user_id, None)
+
+
 async def _get_client() -> httpx.AsyncClient:
     """One shared client so the TLS handshake to RevenueCat is paid once."""
     global _client
@@ -90,16 +101,12 @@ def _parse_rc_datetime(value: str) -> Optional[datetime]:
     return parsed.astimezone(timezone.utc)
 
 
-def entitlement_active(subscriber: Optional[dict]) -> bool:
-    """True when the configured entitlement is present and unexpired.
+def _single_entitlement_active(entitlement: object) -> bool:
+    """True when one entitlement record is present and unexpired.
 
     A null expires_date means a non-expiring (lifetime) grant, which is how
     RevenueCat reports both lifetime products and sandbox grants.
     """
-    entitlements = (subscriber or {}).get("entitlements") or {}
-    if not isinstance(entitlements, dict):
-        return False
-    entitlement = entitlements.get(ENTITLEMENT_ID)
     if not isinstance(entitlement, dict):
         return False
 
@@ -113,6 +120,24 @@ def entitlement_active(subscriber: Optional[dict]) -> bool:
         print(f"[ERR] revenuecat: unparseable expires_date {expires_raw!r}")
         return False
     return expires_at > datetime.now(timezone.utc)
+
+
+def entitlement_active(subscriber: Optional[dict]) -> bool:
+    """True when this subscriber currently holds Pro.
+
+    Prefers the configured ENTITLEMENT_ID, but for this single-entitlement app
+    also treats *any* active entitlement as Pro. That guards against a
+    RevenueCat dashboard identifier that doesn't match ENTITLEMENT_ID, which
+    would otherwise leave a paying subscriber looking un-entitled to the server.
+    """
+    entitlements = (subscriber or {}).get("entitlements") or {}
+    if not isinstance(entitlements, dict):
+        return False
+
+    if _single_entitlement_active(entitlements.get(ENTITLEMENT_ID)):
+        return True
+
+    return any(_single_entitlement_active(e) for e in entitlements.values())
 
 
 # --- Public API ---

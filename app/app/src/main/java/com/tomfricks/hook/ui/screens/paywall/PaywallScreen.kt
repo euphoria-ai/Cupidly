@@ -3,6 +3,9 @@ package com.tomfricks.hook.ui.screens.paywall
 import android.app.Activity
 import android.content.Context
 import android.content.ContextWrapper
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -14,6 +17,9 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -30,7 +36,6 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -50,6 +55,7 @@ import com.revenuecat.purchases.ui.revenuecatui.Paywall
 import com.revenuecat.purchases.ui.revenuecatui.PaywallListener
 import com.revenuecat.purchases.ui.revenuecatui.PaywallOptions
 import com.tomfricks.hook.billing.BillingManager
+import com.tomfricks.hook.billing.BillingOperation
 import com.tomfricks.hook.billing.OfferingsState
 import com.tomfricks.hook.billing.PurchaseResult
 import com.tomfricks.hook.ui.theme.PebbleButton
@@ -57,7 +63,9 @@ import com.tomfricks.hook.ui.theme.PebbleIconButton
 import com.tomfricks.hook.ui.theme.PebbleSurface
 import com.tomfricks.hook.ui.theme.PebbleTextButton
 import com.tomfricks.hook.ui.theme.PebbleTone
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlin.math.roundToInt
 
 private const val TERMS_URL = "https://cupidly.app/terms"
 private const val PRIVACY_URL = "https://cupidly.app/privacy"
@@ -85,7 +93,12 @@ fun PaywallScreen(
     val isAvailable by BillingManager.isAvailable.collectAsState()
     val offeringsState by BillingManager.offeringsState.collectAsState()
 
-    LaunchedEffect(Unit) {
+    // Keyed on isAvailable, not Unit: on a cold start the SDK is still being
+    // configured when this screen composes, both refreshes no-op, and the
+    // offerings would sit at Idle forever — a spinner with nothing behind it.
+    // Re-running once the SDK is up is what gets the plans on screen.
+    LaunchedEffect(isAvailable) {
+        if (!isAvailable) return@LaunchedEffect
         BillingManager.refreshCustomerInfo()
         BillingManager.refreshOfferings()
     }
@@ -100,7 +113,7 @@ fun PaywallScreen(
         !isAvailable -> FallbackPaywall(onNavigateBack = onNavigateBack)
 
         offeringsState is OfferingsState.Idle || offeringsState is OfferingsState.Loading ->
-            PaywallLoading()
+            PaywallLoading(onNavigateBack = onNavigateBack)
 
         hostedOffering != null -> HostedPaywall(
             offering = hostedOffering,
@@ -149,14 +162,29 @@ private fun HostedPaywall(
 }
 
 @Composable
-private fun PaywallLoading() {
+private fun PaywallLoading(onNavigateBack: () -> Unit) {
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(MaterialTheme.colorScheme.background),
-        contentAlignment = Alignment.Center
+            .background(MaterialTheme.colorScheme.background)
     ) {
-        CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
+        // A spinner is never allowed to be a dead end, however briefly.
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 24.dp, vertical = 16.dp),
+            horizontalArrangement = Arrangement.Start
+        ) {
+            PebbleIconButton(
+                icon = Icons.Default.Close,
+                contentDescription = "Close",
+                onClick = onNavigateBack
+            )
+        }
+        CircularProgressIndicator(
+            color = MaterialTheme.colorScheme.primary,
+            modifier = Modifier.align(Alignment.Center)
+        )
     }
 }
 
@@ -174,15 +202,38 @@ private fun FallbackPaywall(
     val context = LocalContext.current
     val activity = remember(context) { context.findActivity() }
     val uriHandler = LocalUriHandler.current
-    val coroutineScope = rememberCoroutineScope()
 
     val isPro by BillingManager.isPro.collectAsState()
     val offeringsState by BillingManager.offeringsState.collectAsState()
     val isAvailable by BillingManager.isAvailable.collectAsState()
 
+    // Both owned by the BillingManager singleton rather than this composition,
+    // so a purchase that outlives an Activity recreation still reports back.
+    val isWorking by BillingManager.purchaseInFlight.collectAsState()
+    val outcome by BillingManager.lastOutcome.collectAsState()
+
     var selectedPackage by remember { mutableStateOf<Package?>(null) }
-    var isWorking by remember { mutableStateOf(false) }
     var statusMessage by remember { mutableStateOf<String?>(null) }
+
+    // The guarantee: whatever happened, and whether or not this screen was alive
+    // when it happened, the user is told about it.
+    LaunchedEffect(outcome) {
+        val finished = outcome ?: return@LaunchedEffect
+        statusMessage = when (val result = finished.result) {
+            is PurchaseResult.Success -> when (finished.operation) {
+                BillingOperation.PURCHASE ->
+                    "You're on ${BillingManager.PRO_DISPLAY_NAME}. Enjoy."
+
+                BillingOperation.RESTORE ->
+                    "${BillingManager.PRO_DISPLAY_NAME} restored."
+            }
+            // Backing out of the Play sheet is a choice, not a failure. Say
+            // nothing at all rather than showing an error for it.
+            is PurchaseResult.Cancelled -> null
+            is PurchaseResult.Failed -> result.message
+        }
+        BillingManager.consumeOutcome()
+    }
 
     val isLoadingOfferings =
         offeringsState is OfferingsState.Idle || offeringsState is OfferingsState.Loading
@@ -199,10 +250,23 @@ private fun FallbackPaywall(
     val bestValue = remember(packages) {
         if (packages.size > 1) packages.maxByOrNull { it.planRank() } else null
     }
+    val yearlySavings = remember(packages) { yearlySavingsPercent(packages) }
 
     LaunchedEffect(packages) {
         if (selectedPackage == null || packages.none { it.identifier == selectedPackage?.identifier }) {
             selectedPackage = bestValue ?: packages.firstOrNull()
+        }
+    }
+
+    // Last line of defence against the post-purchase entitlement race: even if
+    // BillingManager.purchase() gave up before the entitlement landed, the
+    // listener still flips isPro afterwards. However it arrives, Pro arriving
+    // while this screen is open means the purchase worked — drop whatever error
+    // copy is on screen and show the same success line the purchase path does.
+    val wasProOnEntry = remember { isPro }
+    LaunchedEffect(isPro) {
+        if (isPro && !wasProOnEntry) {
+            statusMessage = "You're on ${BillingManager.PRO_DISPLAY_NAME}. Enjoy."
         }
     }
 
@@ -246,7 +310,11 @@ private fun FallbackPaywall(
             Spacer(modifier = Modifier.height(10.dp))
         }
 
-        Spacer(modifier = Modifier.height(14.dp))
+        Spacer(modifier = Modifier.height(20.dp))
+
+        ReviewsCarousel()
+
+        Spacer(modifier = Modifier.height(20.dp))
 
         when {
             isPro -> {
@@ -303,6 +371,11 @@ private fun FallbackPaywall(
                         availablePackage = availablePackage,
                         selected = availablePackage.identifier == selectedPackage?.identifier,
                         isBestValue = availablePackage.identifier == bestValue?.identifier,
+                        savingsPercent = if (availablePackage.planKey() == PlanKey.ANNUAL) {
+                            yearlySavings
+                        } else {
+                            null
+                        },
                         onClick = { selectedPackage = availablePackage }
                     )
                     Spacer(modifier = Modifier.height(10.dp))
@@ -323,18 +396,10 @@ private fun FallbackPaywall(
                             statusMessage = "Couldn't start the purchase. Try again."
                             return@PebbleButton
                         }
-                        isWorking = true
                         statusMessage = null
-                        coroutineScope.launch {
-                            val result = BillingManager.purchase(activity, chosen)
-                            isWorking = false
-                            statusMessage = when (result) {
-                                is PurchaseResult.Success ->
-                                    "You're on ${BillingManager.PRO_DISPLAY_NAME}. Enjoy."
-                                is PurchaseResult.Cancelled -> null
-                                is PurchaseResult.Failed -> result.message
-                            }
-                        }
+                        // Deliberately not launched from a composition scope —
+                        // see BillingManager.startPurchase.
+                        BillingManager.startPurchase(activity, chosen)
                     }
                 )
             }
@@ -370,22 +435,15 @@ private fun FallbackPaywall(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.Center
         ) {
+            // The recovery route for anyone who already paid — reachable
+            // whatever else on this screen went wrong, including while a
+            // purchase is still resolving.
             PebbleTextButton(
-                text = "Restore purchases",
+                text = if (isWorking) "Working…" else "Restore purchases",
                 onClick = {
                     if (isWorking) return@PebbleTextButton
-                    isWorking = true
                     statusMessage = null
-                    coroutineScope.launch {
-                        val result = BillingManager.restorePurchases()
-                        isWorking = false
-                        statusMessage = when (result) {
-                            is PurchaseResult.Success ->
-                                "${BillingManager.PRO_DISPLAY_NAME} restored."
-                            is PurchaseResult.Cancelled -> null
-                            is PurchaseResult.Failed -> result.message
-                        }
-                    }
+                    BillingManager.startRestore()
                 }
             )
         }
@@ -447,6 +505,7 @@ private fun PackageRow(
     availablePackage: Package,
     selected: Boolean,
     isBestValue: Boolean,
+    savingsPercent: Int?,
     onClick: () -> Unit
 ) {
     val contentColor = if (selected) Color.White else MaterialTheme.colorScheme.onSurface
@@ -468,12 +527,20 @@ private fun PackageRow(
             horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = availablePackage.planTitle(),
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.SemiBold,
-                    color = contentColor
-                )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text(
+                        text = availablePackage.planTitle(),
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        color = contentColor
+                    )
+                    if (savingsPercent != null) {
+                        SavingsBadge(percent = savingsPercent, selected = selected)
+                    }
+                }
                 val caption = when {
                     trial && isBestValue -> "Best value · free trial included"
                     isBestValue -> "Best value"
@@ -493,6 +560,165 @@ private fun PackageRow(
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.Bold,
                 color = contentColor
+            )
+        }
+    }
+}
+
+/** Small "SAVE x%" pill, sized to sit next to the yearly plan's title. */
+@Composable
+private fun SavingsBadge(percent: Int, selected: Boolean) {
+    // Flip the pill's colours on the selected (blue) row so it stays legible.
+    val background = if (selected) Color.White else MaterialTheme.colorScheme.primary
+    val foreground = if (selected) MaterialTheme.colorScheme.primary else Color.White
+
+    Box(
+        modifier = Modifier
+            .background(color = background, shape = RoundedCornerShape(8.dp))
+            .padding(horizontal = 8.dp, vertical = 3.dp)
+    ) {
+        Text(
+            text = "SAVE $percent%",
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.Bold,
+            color = foreground
+        )
+    }
+}
+
+/**
+ * How much cheaper a year on the yearly plan is than a year on the reference
+ * plan. Prices are compared as annualised amounts in micros so currency and
+ * cadence differences cancel out:
+ *  - yearly     → its own [amountMicros]
+ *  - monthly    → [amountMicros] × 12   (preferred reference)
+ *  - weekly     → [amountMicros] × 52   (fallback reference)
+ *
+ * Returns null when there's no yearly plan, no reference plan, or the yearly
+ * plan isn't actually a saving — the badge is only shown for a positive result.
+ */
+private fun yearlySavingsPercent(packages: List<Package>): Int? {
+    val yearly = packages.firstOrNull { it.planKey() == PlanKey.ANNUAL } ?: return null
+    val monthly = packages.firstOrNull { it.planKey() == PlanKey.MONTHLY }
+    val weekly = packages.firstOrNull { it.planKey() == PlanKey.WEEKLY }
+
+    val yearlyAnnualized = yearly.product.price.amountMicros
+    val referenceAnnualized = when {
+        monthly != null -> monthly.product.price.amountMicros * 12
+        weekly != null -> weekly.product.price.amountMicros * 52
+        else -> return null
+    }
+    if (referenceAnnualized <= 0L) return null
+
+    val percent = ((referenceAnnualized - yearlyAnnualized).toDouble() /
+        referenceAnnualized * 100).roundToInt()
+    return if (percent > 0) percent else null
+}
+
+/** A single testimonial shown in the [ReviewsCarousel]. */
+private data class Review(val name: String, val text: String, val rating: Int = 5)
+
+// Placeholder testimonial copy — safe for the owner to edit or replace with
+// real reviews. These are illustrative only, not attributed to real users.
+private val REVIEWS = listOf(
+    Review("Jordan M.", "Matched on Friday, had a date by Sunday. Hook always knows what to say."),
+    Review("Priya K.", "I used to overthink every reply for ten minutes. Now it takes ten seconds."),
+    Review("Alex R.", "The tones are unreal — funny when I want funny, smooth when I want smooth."),
+    Review("Sam T.", "Went from dry 'hey' replies to actual conversations. Genuinely a cheat code."),
+    Review("Casey L.", "Worth every penny. My matches think I got way funnier overnight.")
+)
+
+/**
+ * Auto-advancing testimonials carousel. Purely decorative social proof — it
+ * wraps back to the first card and never blocks the purchase flow.
+ */
+@Composable
+private fun ReviewsCarousel() {
+    val pagerState = rememberPagerState(pageCount = { REVIEWS.size })
+
+    // Drift to the next card every few seconds, looping at the end.
+    LaunchedEffect(pagerState) {
+        while (true) {
+            delay(3500)
+            val next = (pagerState.currentPage + 1) % REVIEWS.size
+            pagerState.animateScrollToPage(next)
+        }
+    }
+
+    Column(modifier = Modifier.fillMaxWidth()) {
+        HorizontalPager(
+            state = pagerState,
+            modifier = Modifier.fillMaxWidth()
+        ) { page ->
+            ReviewCard(review = REVIEWS[page])
+        }
+
+        Spacer(modifier = Modifier.height(12.dp))
+
+        // Page indicator dots, mirroring the onboarding/demo pattern.
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.Center
+        ) {
+            repeat(REVIEWS.size) { index ->
+                val active = pagerState.currentPage == index
+                val width by animateDpAsState(
+                    targetValue = if (active) 20.dp else 8.dp,
+                    animationSpec = tween(300),
+                    label = "review_indicator_width"
+                )
+                val alpha by animateFloatAsState(
+                    targetValue = if (active) 1f else 0.3f,
+                    animationSpec = tween(300),
+                    label = "review_indicator_alpha"
+                )
+                Box(
+                    modifier = Modifier
+                        .padding(horizontal = 3.dp)
+                        .width(width)
+                        .height(8.dp)
+                        .background(
+                            color = MaterialTheme.colorScheme.primary.copy(alpha = alpha),
+                            shape = RoundedCornerShape(4.dp)
+                        )
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun ReviewCard(review: Review) {
+    PebbleSurface(
+        onClick = null,
+        modifier = Modifier.fillMaxWidth(),
+        tone = PebbleTone.MUTED,
+        cornerRadius = 18.dp
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 18.dp, vertical = 18.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Text(
+                text = "★".repeat(review.rating),
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.primary
+            )
+            Spacer(modifier = Modifier.height(10.dp))
+            Text(
+                text = review.text,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurface,
+                textAlign = TextAlign.Center
+            )
+            Spacer(modifier = Modifier.height(10.dp))
+            Text(
+                text = review.name,
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
     }

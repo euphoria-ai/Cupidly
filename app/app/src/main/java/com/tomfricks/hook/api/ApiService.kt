@@ -31,6 +31,11 @@ interface HookApiInterface {
 
     @GET("/me")
     suspend fun me(): Response<MeResponse>
+
+    // Same response shape as /me, but drops the server's cached RevenueCat
+    // answer first. No body — the identity is in the auth headers.
+    @POST("/entitlement/refresh")
+    suspend fun refreshEntitlement(): Response<MeResponse>
 }
 
 /** Suggestions, the updated hidden conversation context, and what's left of the allowance. */
@@ -155,28 +160,47 @@ class ApiService(
      * purchase so the paywall and the keyboard's counter stay honest.
      */
     suspend fun fetchEntitlement(): Result<EntitlementState> = withContext(Dispatchers.IO) {
-        try {
-            val response = api.me()
-            if (!response.isSuccessful) {
-                logHttpError(response.code(), "GET /me")
-                return@withContext Result.failure(
-                    Exception("GET /me failed with HTTP ${response.code()}")
-                )
-            }
-            val body = response.body()
-                ?: return@withContext Result.failure(Exception("Empty /me response"))
+        entitlementResult("GET /me") { api.me() }
+    }
 
-            val entitlement = EntitlementState(
-                isPro = body.isPro,
-                freeUsed = body.freeUsed,
-                freeLimit = body.freeLimit.orDefaultLimit()
-            )
-            cacheEntitlement(entitlement)
-            Result.success(entitlement)
-        } catch (e: Exception) {
-            Log.e(TAG, "Error fetching entitlement", e)
-            Result.failure(e)
+    /**
+     * Ask the server to re-check RevenueCat for this install *now*, ignoring its
+     * short-lived entitlement cache.
+     *
+     * Called right after a purchase grants Pro. Without it the server can keep
+     * answering "not Pro" for the rest of its cache TTL, i.e. reject a
+     * generation with 402 from someone who has just paid.
+     */
+    suspend fun refreshServerEntitlement(): Result<EntitlementState> = withContext(Dispatchers.IO) {
+        entitlementResult("POST /entitlement/refresh") { api.refreshEntitlement() }
+    }
+
+    /** Shared handling for the two routes that answer with [MeResponse]. */
+    private suspend fun entitlementResult(
+        route: String,
+        call: suspend () -> Response<MeResponse>
+    ): Result<EntitlementState> = try {
+        val response = call()
+        if (!response.isSuccessful) {
+            logHttpError(response.code(), route)
+            Result.failure(Exception("$route failed with HTTP ${response.code()}"))
+        } else {
+            val body = response.body()
+            if (body == null) {
+                Result.failure(Exception("Empty $route response"))
+            } else {
+                val entitlement = EntitlementState(
+                    isPro = body.isPro,
+                    freeUsed = body.freeUsed,
+                    freeLimit = body.freeLimit.orDefaultLimit()
+                )
+                cacheEntitlement(entitlement)
+                Result.success(entitlement)
+            }
         }
+    } catch (e: Exception) {
+        Log.e(TAG, "Error calling $route", e)
+        Result.failure(e)
     }
 
     /** Maps a non-2xx response onto the typed result, logging enough to debug it. */
