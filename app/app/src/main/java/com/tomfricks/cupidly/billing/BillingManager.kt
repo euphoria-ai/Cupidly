@@ -55,7 +55,7 @@ sealed interface OfferingsState {
 }
 
 /**
- * Thin wrapper around the RevenueCat SDK (v9).
+ * Thin wrapper around the RevenueCat SDK (v10).
  *
  * A process-wide singleton because the paywall (an Activity), the keyboard IME
  * and the screenshot service all need the same entitlement answer, and
