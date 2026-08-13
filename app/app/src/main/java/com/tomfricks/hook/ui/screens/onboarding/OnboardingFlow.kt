@@ -34,7 +34,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -48,14 +47,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.LifecycleEventObserver
 import com.tomfricks.hook.data.AnswerOption
 import com.tomfricks.hook.data.OnboardingField
 import com.tomfricks.hook.data.OnboardingQuestion
@@ -450,65 +447,46 @@ private fun EnableKeyboardStep(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
-    val lifecycleOwner = LocalLifecycleOwner.current
-
-    var enabled by remember { mutableStateOf(PermissionUtils.isKeyboardEnabled(context)) }
-    var selected by remember { mutableStateOf(PermissionUtils.isKeyboardSelected(context)) }
-    var photos by remember { mutableStateOf(PermissionUtils.hasPhotoAccess(context)) }
-
-    fun refresh() {
-        enabled = PermissionUtils.isKeyboardEnabled(context)
-        selected = PermissionUtils.isKeyboardSelected(context)
-        photos = PermissionUtils.hasPhotoAccess(context)
-    }
-
-    // The keyboard chooser is a system dialog drawn over this activity, not a
-    // separate one: picking Hook in it never pauses us, so ON_RESUME never
-    // fires and the tick would sit there grey until something else forced a
-    // recomposition. Polling is what actually catches the switch. Three cheap
-    // lookups, and only while this step is on screen.
-    LaunchedEffect(Unit) {
-        while (true) {
-            delay(400)
-            refresh()
-        }
-    }
-
-    // Returning from a full Settings screen *does* resume us, and instant beats
-    // waiting out the poll.
-    DisposableEffect(lifecycleOwner) {
-        val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_RESUME) refresh()
-        }
-        lifecycleOwner.lifecycle.addObserver(observer)
-        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
-    }
+    val setup = rememberKeyboardSetup()
+    var photoAsked by remember { mutableStateOf(false) }
 
     val photoLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission()
-    ) { granted -> photos = granted }
+    ) { photoAsked = true }
 
     val tasks = listOf(
         SetupTask(
             title = "Turn on the Hook keyboard",
             detail = "In Settings, under on-screen keyboards",
-            done = enabled,
+            done = setup.enabled,
             action = "Open Settings",
             onAction = { PermissionUtils.openKeyboardSettings(context) }
         ),
         SetupTask(
             title = "Switch to Hook",
             detail = "Pick Hook from the keyboard chooser",
-            done = selected,
+            done = setup.selected,
             action = "Choose Hook",
             onAction = { PermissionUtils.showKeyboardPicker(context) }
         ),
         SetupTask(
             title = "Allow access to your photos",
-            detail = "So Hook can read the screenshots you take",
-            done = photos,
+            detail = if (photoAsked && !setup.photos) {
+                "Android said no — tap to open Hook's settings and allow photos"
+            } else {
+                "So Hook can read the screenshots you take"
+            },
+            done = setup.photos,
             action = "Allow Photo Access",
-            onAction = { photoLauncher.launch(PermissionUtils.photoPermission) }
+            // A second refusal makes the system dialog stop appearing at all,
+            // so from then on the only way through is app settings.
+            onAction = {
+                if (photoAsked && !setup.photos) {
+                    PermissionUtils.openAppSettings(context)
+                } else {
+                    photoLauncher.launch(PermissionUtils.photoPermission)
+                }
+            }
         )
     )
     val nextIndex = tasks.indexOfFirst { !it.done }
