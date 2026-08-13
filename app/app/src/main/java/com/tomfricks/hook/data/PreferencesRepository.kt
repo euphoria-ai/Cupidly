@@ -24,6 +24,20 @@ class PreferencesRepository(private val context: Context) {
         const val DEFAULT_FREE_LIMIT = 5
 
         /**
+         * Bumped whenever onboarding changes enough that people who already
+         * finished the old one should see the new one.
+         *
+         * Without this, "has completed onboarding" is a one-way flag set by
+         * whatever the flow happened to be at the time, and every existing
+         * install skips a rebuilt onboarding forever — including every tester
+         * who ever opened the app before.
+         *
+         * 1 = the original two-page welcome + enable-keyboard screen.
+         * 2 = pitch slides, profile questions, keyboard checklist, live demo.
+         */
+        const val ONBOARDING_VERSION = 2
+
+        /**
          * Process-wide cache of the install id, filled the first time it is
          * read. Lets non-suspending callers — chiefly the OkHttp interceptor
          * that stamps `X-App-User-Id` on every request — get the id without
@@ -49,6 +63,7 @@ class PreferencesRepository(private val context: Context) {
         val PROFILE_AGE_RANGE = stringPreferencesKey("profile_age_range")
         val PROFILE_LOOKING_FOR = stringPreferencesKey("profile_looking_for")
         val HAS_COMPLETED_ONBOARDING = booleanPreferencesKey("has_completed_onboarding")
+        val ONBOARDING_VERSION = intPreferencesKey("onboarding_version")
         val ONBOARDING_CHECKPOINT = stringPreferencesKey("onboarding_checkpoint")
         val ONBOARDING_SYNCED = booleanPreferencesKey("onboarding_synced")
         val APP_USER_ID = stringPreferencesKey("app_user_id")
@@ -84,7 +99,12 @@ class PreferencesRepository(private val context: Context) {
             profilePronouns = preferences[PreferencesKeys.PROFILE_PRONOUNS] ?: "",
             profileAgeRange = preferences[PreferencesKeys.PROFILE_AGE_RANGE] ?: "",
             profileLookingFor = preferences[PreferencesKeys.PROFILE_LOOKING_FOR] ?: "",
-            hasCompletedOnboarding = preferences[PreferencesKeys.HAS_COMPLETED_ONBOARDING] ?: false
+            // Finished, *and* finished the onboarding we ship today. Someone
+            // who completed the old one has no version stored, so they get the
+            // new flow once — and then never again.
+            hasCompletedOnboarding =
+                (preferences[PreferencesKeys.HAS_COMPLETED_ONBOARDING] ?: false) &&
+                    (preferences[PreferencesKeys.ONBOARDING_VERSION] ?: 0) >= ONBOARDING_VERSION
         )
     }
     
@@ -251,9 +271,15 @@ class PreferencesRepository(private val context: Context) {
     suspend fun setOnboardingCompleted() {
         context.dataStore.edit { preferences ->
             preferences[PreferencesKeys.HAS_COMPLETED_ONBOARDING] = true
-            // Nothing left to resume; the flag above is what keeps the flow from
-            // ever being shown again.
+            // Stamped with what they actually completed, so a future rebuild can
+            // tell them apart from someone who did an older one.
+            preferences[PreferencesKeys.ONBOARDING_VERSION] = ONBOARDING_VERSION
+            // Nothing left to resume; the flags above are what keep the flow
+            // from ever being shown again.
             preferences.remove(PreferencesKeys.ONBOARDING_CHECKPOINT)
+            // These answers are new, so they need sending even if an older
+            // profile from this install already went out.
+            preferences.remove(PreferencesKeys.ONBOARDING_SYNCED)
         }
     }
 
@@ -280,6 +306,9 @@ class PreferencesRepository(private val context: Context) {
             preferences[PreferencesKeys.PROFILE_AGE_RANGE] = userPreferences.profileAgeRange
             preferences[PreferencesKeys.PROFILE_LOOKING_FOR] = userPreferences.profileLookingFor
             preferences[PreferencesKeys.HAS_COMPLETED_ONBOARDING] = userPreferences.hasCompletedOnboarding
+            if (userPreferences.hasCompletedOnboarding) {
+                preferences[PreferencesKeys.ONBOARDING_VERSION] = ONBOARDING_VERSION
+            }
         }
     }
     
