@@ -215,6 +215,19 @@ private fun FallbackPaywall(
         }
     }
 
+    // Last line of defence against the post-purchase entitlement race: even if
+    // BillingManager.purchase() gave up before the entitlement landed, the
+    // listener still flips isPro afterwards. However it arrives, Pro arriving
+    // while this screen is open means the purchase worked — drop whatever error
+    // copy is on screen and show the same success line the purchase path does.
+    val wasProOnEntry = remember { isPro }
+    LaunchedEffect(isPro) {
+        if (isPro && !wasProOnEntry) {
+            isWorking = false
+            statusMessage = "You're on ${BillingManager.PRO_DISPLAY_NAME}. Enjoy."
+        }
+    }
+
     Column(
         modifier = Modifier
             .fillMaxSize()

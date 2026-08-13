@@ -3,6 +3,7 @@ package com.tomfricks.cupidly.billing
 import android.app.Activity
 import android.content.Context
 import android.util.Log
+import com.revenuecat.purchases.CacheFetchPolicy
 import com.revenuecat.purchases.CustomerInfo
 import com.revenuecat.purchases.LogLevel
 import com.revenuecat.purchases.Offering
@@ -22,6 +23,7 @@ import com.tomfricks.cupidly.data.PreferencesRepository
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -83,6 +85,15 @@ object BillingManager {
     const val PRO_DISPLAY_NAME = "Hook Pro"
 
     private const val TAG = "BillingManager"
+
+    /**
+     * How hard to chase an entitlement that a completed purchase hasn't shown
+     * us yet. Three tries 800ms apart is a ~2.4s worst case — long enough for
+     * the backend to catch up, short enough that the paywall button doesn't
+     * feel stuck.
+     */
+    private const val ENTITLEMENT_RECHECK_ATTEMPTS = 3
+    private const val ENTITLEMENT_RECHECK_DELAY_MS = 800L
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
@@ -200,10 +211,19 @@ object BillingManager {
                 PurchaseParams.Builder(activity, packageToPurchase).build()
             )
             onCustomerInfo(result.customerInfo)
-            if (result.customerInfo.hasPro()) {
+            // Race: the CustomerInfo handed back here can predate the
+            // entitlement. RevenueCat frequently delivers the entitlement a
+            // beat later through the updatedCustomerInfoListener wired up in
+            // configure(), so this single synchronous read says "not Pro" for a
+            // purchase that actually succeeded. Don't fail on it alone — give
+            // the entitlement a bounded moment to land first.
+            if (result.customerInfo.hasPro() || awaitProEntitlement()) {
                 PurchaseResult.Success
             } else {
-                PurchaseResult.Failed("Purchase went through but $PRO_DISPLAY_NAME isn't active yet")
+                PurchaseResult.Failed(
+                    "Purchase went through but $PRO_DISPLAY_NAME isn't active yet — " +
+                        "it can take a moment. Try Restore purchases."
+                )
             }
         } catch (e: PurchasesTransactionException) {
             if (e.userCancelled) {
@@ -216,6 +236,35 @@ object BillingManager {
             Log.e(TAG, "Purchase failed: ${e.message}")
             PurchaseResult.Failed(e.message)
         }
+    }
+
+    /**
+     * Re-check the entitlement a few times for a purchase that came back
+     * without it, returning true as soon as it shows up.
+     *
+     * Deliberately cache-busting ([CacheFetchPolicy.FETCH_CURRENT]): the cached
+     * CustomerInfo is exactly what's stale in this situation. Every fetch still
+     * goes through [onCustomerInfo] so the StateFlow and the persisted cache
+     * move with it.
+     *
+     * A network error here isn't a purchase error — it only means we couldn't
+     * confirm, so it ends the wait quietly instead of propagating.
+     */
+    private suspend fun awaitProEntitlement(): Boolean {
+        repeat(ENTITLEMENT_RECHECK_ATTEMPTS) {
+            delay(ENTITLEMENT_RECHECK_DELAY_MS)
+            try {
+                val customerInfo = Purchases.sharedInstance.awaitCustomerInfo(
+                    fetchPolicy = CacheFetchPolicy.FETCH_CURRENT
+                )
+                onCustomerInfo(customerInfo)
+                if (customerInfo.hasPro()) return true
+            } catch (e: PurchasesException) {
+                Log.w(TAG, "Could not re-check entitlement after purchase: ${e.message}")
+                return false
+            }
+        }
+        return false
     }
 
     /** Bring back a subscription bought on another install of the same account. */
