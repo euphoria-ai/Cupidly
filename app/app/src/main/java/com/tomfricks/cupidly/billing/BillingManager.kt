@@ -244,8 +244,12 @@ object BillingManager {
         }
     }
 
+    // Prefer the configured identifier, but for this single-entitlement app also
+    // treat *any* active entitlement as Pro. This defends against a RevenueCat
+    // dashboard identifier that doesn't match ENTITLEMENT_ID (e.g. "pro" instead
+    // of "Hook Pro"), which otherwise leaves a paying user stuck on the paywall.
     private fun CustomerInfo.hasPro(): Boolean =
-        entitlements[ENTITLEMENT_ID]?.isActive == true
+        entitlements[ENTITLEMENT_ID]?.isActive == true || entitlements.active.isNotEmpty()
 
     /**
      * Single funnel for every entitlement update: state flow + persisted cache.

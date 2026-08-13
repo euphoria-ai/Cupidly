@@ -556,14 +556,32 @@ async def test_no_secret_key_means_not_pro(monkeypatch):
 
 
 async def test_entitlement_id_is_configurable(monkeypatch):
+    """ENTITLEMENT_ID is the preferred match, but this is a single-entitlement
+    app, so *any* active entitlement grants Pro.
+
+    A subscriber whose only active entitlement lives under a different
+    identifier than ENTITLEMENT_ID still gets Pro — this guards against a
+    RevenueCat dashboard identifier that doesn't line up with ENTITLEMENT_ID.
+    Pointing ENTITLEMENT_ID directly at that identifier keeps working too.
+    """
     _mock_revenuecat(monkeypatch, lambda request: httpx.Response(
         200, json={"subscriber": {"entitlements": {
             "hook_pro": {"expires_date": None}}}}))
-    assert await entitlements.is_pro(USER) is False
+    # Different-but-active identifier: single-entitlement rule grants Pro.
+    assert await entitlements.is_pro(USER) is True
 
+    # The configured-identifier path still works when it matches.
     monkeypatch.setattr(entitlements, "ENTITLEMENT_ID", "hook_pro")
     entitlements.clear_cache()
     assert await entitlements.is_pro(USER) is True
+
+    # It's *active* that grants Pro, not merely having an entitlement present:
+    # an expired entitlement under a non-configured identifier stays not-Pro.
+    monkeypatch.setattr(entitlements, "ENTITLEMENT_ID", "Hook Pro")
+    _mock_revenuecat(monkeypatch, lambda request: httpx.Response(
+        200, json={"subscriber": {"entitlements": {
+            "hook_pro": {"expires_date": "2020-01-01T00:00:00Z"}}}}))
+    assert await entitlements.is_pro(USER) is False
 
 
 async def test_secret_key_is_sent_as_bearer_token(monkeypatch):
