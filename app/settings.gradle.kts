@@ -22,5 +22,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "Cupidly"
+rootProject.name = "Hook"
 include(":app")

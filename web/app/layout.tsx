@@ -21,11 +21,11 @@ export const metadata: Metadata = {
     template: `%s — ${site.name}`,
   },
   description:
-    "Cupidly is the AI keyboard that writes your replies for you. Available on Google Play.",
+    "Hook is the AI keyboard that writes your replies for you. Available on Google Play.",
   openGraph: {
     title: `${site.name} — ${site.tagline}`,
     description:
-      "Cupidly is the AI keyboard that writes your replies for you. Available on Google Play.",
+      "Hook is the AI keyboard that writes your replies for you. Available on Google Play.",
     url: site.url,
     siteName: site.name,
     type: "website",
