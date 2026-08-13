@@ -1,7 +1,6 @@
 package com.tomfricks.hook.keyboard
 
 import android.content.Intent
-import android.graphics.Bitmap
 import android.inputmethodservice.InputMethodService
 import android.os.Build
 import android.util.Log
@@ -20,6 +19,7 @@ import androidx.savedstate.setViewTreeSavedStateRegistryOwner
 import com.tomfricks.hook.MainActivity
 import com.tomfricks.hook.api.ApiService
 import com.tomfricks.hook.api.GenerateRepliesResult
+import com.tomfricks.hook.api.ReplyError
 import com.tomfricks.hook.billing.BillingManager
 import com.tomfricks.hook.data.EntitlementState
 import com.tomfricks.hook.data.PreferencesRepository
@@ -130,15 +130,12 @@ class HookKeyboardService : InputMethodService(), LifecycleOwner {
         // generated in the meantime is kept; only a stale round is dropped.
         RizzSession.clearIfStale()
 
-        // Opened onto a screenshot nobody has processed yet (detection fired
-        // while the app was cold, or generation died with no keyboard alive):
-        // start it here rather than waiting for a tap.
-        if (RizzSession.status != RizzSession.Status.GENERATING &&
-            !RizzSession.hasPendingSuggestions &&
-            RizzSession.hasFreshScreenshot
-        ) {
-            RizzSession.latestScreenshot?.let { generateReplies(it) }
-        }
+        // Android shows and re-shows the IME constantly — every field focus,
+        // every return from another app, and notably the moment a picked reply
+        // is committed. So this may *only* pick up a screenshot that has never
+        // had its round: the claim returns null in every other case, and the
+        // keyboard stays idle until the user takes another screenshot.
+        RizzSession.claimForScreenshot()?.let { generateReplies(it) }
     }
 
     override fun onFinishInputView(finishingInput: Boolean) {
@@ -152,19 +149,17 @@ class HookKeyboardService : InputMethodService(), LifecycleOwner {
         stopScreenshotService()
     }
 
+    /**
+     * The action pill: the one place a *repeat* round on the same screenshot is
+     * allowed, because the user asked for it in so many words. The claim also
+     * absorbs double taps and taps landing while a round is in flight.
+     */
     private fun onGenerateClicked() {
-        // Ignore taps while a round is already in flight — the button is also
-        // disabled in the UI, this just guards the callback.
-        if (RizzSession.status == RizzSession.Status.GENERATING) return
-
-        val screenshot = RizzSession.latestScreenshot
-        if (screenshot != null && RizzSession.hasFreshScreenshot) {
-            // "Generate more rizz": another round on the latest screenshot.
-            generateReplies(screenshot)
-        } else {
-            RizzSession.onFailure(
-                "Take a screenshot (Power + Volume Down) — replies appear on their own."
-            )
+        val generation = RizzSession.claimForRetry()
+        if (generation != null) {
+            generateReplies(generation)
+        } else if (!RizzSession.isGenerating) {
+            RizzSession.onUnstartable(ReplyError.NO_SCREENSHOT)
         }
     }
 
@@ -179,28 +174,41 @@ class HookKeyboardService : InputMethodService(), LifecycleOwner {
         }
     }
 
-    private fun generateReplies(screenshot: Bitmap) {
+    /**
+     * Run one claimed round. The claim already put the session into GENERATING,
+     * and its token decides whether the answer is still wanted by the time it
+     * arrives — a newer screenshot, or "+", retires it in flight.
+     */
+    private fun generateReplies(generation: RizzSession.Generation) {
         serviceScope.launch {
-            RizzSession.onGenerating()
-
+            val token = generation.token
             val prefs = preferencesRepository.userPreferencesFlow.first()
 
             // Carry the hidden session context into the request and store the
             // server's updated context (in memory only) before showing replies.
-            val currentContext = ConversationSession.conversationContext
+            val snapshot = ConversationSession.snapshot()
 
-            when (val result = apiService?.generateReplies(screenshot, prefs, currentContext)) {
+            when (
+                val result =
+                    apiService?.generateReplies(generation.screenshot, prefs, snapshot.context)
+            ) {
                 is GenerateRepliesResult.Success -> {
                     val generated = result.replies
-                    ConversationSession.update(generated.context)
-                    RizzSession.onSuggestions(generated.suggestions)
-                    Log.d("HookKeyboard", "Generated ${generated.suggestions.size} suggestions")
+                    // A superseded round leaves nothing behind — not the
+                    // suggestions, and not the hidden context either.
+                    if (RizzSession.isLive(token)) {
+                        ConversationSession.update(snapshot.sessionId, generated.context)
+                        RizzSession.onSuggestions(token, generated.suggestions)
+                        Log.d("HookKeyboard", "Generated ${generated.suggestions.size} suggestions")
+                    } else {
+                        Log.d("HookKeyboard", "Dropping superseded round $token")
+                    }
                 }
 
                 is GenerateRepliesResult.AllowanceExhausted -> {
                     // Not a failure: swap the panel over to the upsell so the
                     // user can go buy Pro in the main app.
-                    RizzSession.onAllowanceExhausted()
+                    RizzSession.onAllowanceExhausted(token)
                     Log.i(
                         "HookKeyboard",
                         "Free allowance spent (${result.used}/${result.freeLimit})"
@@ -208,11 +216,11 @@ class HookKeyboardService : InputMethodService(), LifecycleOwner {
                 }
 
                 is GenerateRepliesResult.Failure -> {
-                    RizzSession.onFailure(result.message)
-                    Log.e("HookKeyboard", "Error generating replies: ${result.message}")
+                    RizzSession.onFailure(token, result.error)
+                    Log.e("HookKeyboard", "Generation failed: ${result.error}")
                 }
 
-                null -> RizzSession.onFailure("Couldn't reach Hook")
+                null -> RizzSession.onFailure(token, ReplyError.SERVER)
             }
         }
     }
