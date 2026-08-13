@@ -21,6 +21,7 @@ import android.util.Log
 import androidx.core.app.NotificationCompat
 import com.tomfricks.hook.api.ApiService
 import com.tomfricks.hook.api.GenerateRepliesResult
+import com.tomfricks.hook.api.ReplyError
 import com.tomfricks.hook.keyboard.ConversationSession
 import com.tomfricks.hook.data.PreferencesRepository
 import com.tomfricks.hook.data.UserPreferences
@@ -156,13 +157,20 @@ class ScreenshotDetectionService : Service() {
                                     if (bitmap != null) {
                                         // Record the round centrally first, so it
                                         // survives with or without a live keyboard.
-                                        withContext(Dispatchers.Main) {
+                                        // One screenshot buys exactly one round:
+                                        // a null claim means the keyboard got
+                                        // there first (it claims on show, for
+                                        // screenshots taken while the app was
+                                        // cold), and the same image is never
+                                        // generated from twice.
+                                        val generation = withContext(Dispatchers.Main) {
                                             RizzSession.onScreenshot(bitmap)
                                             onScreenshotDetected?.invoke(bitmap)
+                                            RizzSession.claimForScreenshot()
                                         }
-
-                                        // Automatically generate replies
-                                        generateAutoReplies(bitmap)
+                                        if (generation != null) {
+                                            generateAutoReplies(generation)
+                                        }
 
                                         Log.d("ScreenshotDetection", "Screenshot detected and processed: $path")
                                     }
@@ -240,58 +248,77 @@ class ScreenshotDetectionService : Service() {
         }
     }
     
-    private fun generateAutoReplies(bitmap: Bitmap) {
+    /**
+     * Run the round [generation] was granted for. Its token is what keeps a
+     * slow answer from overwriting a newer one: if the user screenshots again
+     * mid-flight, this result is dropped and the newer round owns the UI.
+     */
+    private fun generateAutoReplies(generation: RizzSession.Generation) {
         serviceScope.launch(Dispatchers.IO) {
-            try {
-                val prefs = preferencesRepository.userPreferencesFlow.first()
+            val token = generation.token
 
-                // Carry the hidden session context into the request; it keeps
-                // building even across screenshots where no reply was picked.
-                val currentContext = ConversationSession.conversationContext
+            // Carry the hidden session context into the request; it keeps
+            // building even across screenshots where no reply was picked.
+            val snapshot = ConversationSession.snapshot()
+            val prefs = try {
+                preferencesRepository.userPreferencesFlow.first()
+            } catch (e: Exception) {
+                Log.e("ScreenshotDetection", "Could not read preferences", e)
+                withContext(Dispatchers.Main) { fail(token, ReplyError.SERVER) }
+                return@launch
+            }
 
-                when (val result = apiService.generateReplies(bitmap, prefs, currentContext)) {
-                    is GenerateRepliesResult.Success -> {
-                        val generated = result.replies
-                        // Persist the updated context (in memory only) before the UI
-                        // shows the fresh suggestions.
-                        ConversationSession.update(generated.context)
-                        withContext(Dispatchers.Main) {
-                            RizzSession.onSuggestions(generated.suggestions)
-                            onAutoReplyGenerated?.invoke(generated.suggestions)
+            when (
+                val result =
+                    apiService.generateReplies(generation.screenshot, prefs, snapshot.context)
+            ) {
+                is GenerateRepliesResult.Success -> {
+                    val generated = result.replies
+                    withContext(Dispatchers.Main) {
+                        // A superseded round leaves nothing behind — not the
+                        // suggestions, and not the hidden context either. Every
+                        // mutation of the session happens on this thread, so the
+                        // check and the writes can't interleave with a new claim.
+                        if (!RizzSession.isLive(token)) {
+                            Log.d("ScreenshotDetection", "Dropping superseded round $token")
+                            return@withContext
                         }
-                        Log.d("ScreenshotDetection", "Auto-generated ${generated.suggestions.size} replies")
-                    }
-
-                    is GenerateRepliesResult.AllowanceExhausted -> {
-                        // The keyboard turns this into an upgrade prompt rather
-                        // than an error message.
-                        Log.i(
+                        // Persist the updated context (in memory only) before the
+                        // UI shows the fresh suggestions.
+                        ConversationSession.update(snapshot.sessionId, generated.context)
+                        RizzSession.onSuggestions(token, generated.suggestions)
+                        onAutoReplyGenerated?.invoke(generated.suggestions)
+                        Log.d(
                             "ScreenshotDetection",
-                            "Free allowance spent (${result.used}/${result.freeLimit})"
+                            "Auto-generated ${generated.suggestions.size} replies"
                         )
-                        withContext(Dispatchers.Main) {
-                            RizzSession.onAllowanceExhausted()
-                            onAutoReplyFailed?.invoke("You're out of free rizz. Go Pro for unlimited.")
-                        }
-                    }
-
-                    is GenerateRepliesResult.Failure -> {
-                        Log.e("ScreenshotDetection", "Error generating auto replies: ${result.message}")
-                        withContext(Dispatchers.Main) {
-                            RizzSession.onFailure(result.message)
-                            onAutoReplyFailed?.invoke(result.message)
-                        }
                     }
                 }
-            } catch (e: Exception) {
-                Log.e("ScreenshotDetection", "Error generating auto replies", e)
-                withContext(Dispatchers.Main) {
-                    val reason = e.message ?: "Couldn't reach Hook"
-                    RizzSession.onFailure(reason)
-                    onAutoReplyFailed?.invoke(reason)
+
+                is GenerateRepliesResult.AllowanceExhausted -> {
+                    // The keyboard turns this into an upgrade prompt rather
+                    // than an error message.
+                    Log.i(
+                        "ScreenshotDetection",
+                        "Free allowance spent (${result.used}/${result.freeLimit})"
+                    )
+                    withContext(Dispatchers.Main) {
+                        RizzSession.onAllowanceExhausted(token)
+                        onAutoReplyFailed?.invoke("You're out of free rizz. Go Pro for unlimited.")
+                    }
+                }
+
+                is GenerateRepliesResult.Failure -> {
+                    Log.e("ScreenshotDetection", "Generation failed: ${result.error}")
+                    withContext(Dispatchers.Main) { fail(token, result.error) }
                 }
             }
         }
+    }
+
+    private fun fail(token: Long, error: ReplyError) {
+        RizzSession.onFailure(token, error)
+        onAutoReplyFailed?.invoke(error.userMessage)
     }
     
     private fun createNotification(): Notification {

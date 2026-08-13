@@ -21,7 +21,12 @@ import retrofit2.http.Body
 import retrofit2.http.GET
 import retrofit2.http.POST
 import java.io.ByteArrayOutputStream
+import java.io.IOException
+import java.net.ConnectException
+import java.net.SocketTimeoutException
+import java.net.UnknownHostException
 import java.util.concurrent.TimeUnit
+import javax.net.ssl.SSLException
 
 interface HookApiInterface {
     // Response<T> rather than a bare body: a 402 is a *product state*, not a
@@ -55,7 +60,12 @@ sealed interface GenerateRepliesResult {
     /** HTTP 402 — the lifetime free allowance is spent; the user must subscribe. */
     data class AllowanceExhausted(val freeLimit: Int, val used: Int) : GenerateRepliesResult
 
-    data class Failure(val message: String, val code: Int? = null) : GenerateRepliesResult
+    /**
+     * Carries a [ReplyError], never a string: whatever the server or the
+     * network actually said is logged here and goes no further, so the keyboard
+     * can only ever show copy we wrote.
+     */
+    data class Failure(val error: ReplyError) : GenerateRepliesResult
 }
 
 class ApiService(
@@ -133,26 +143,39 @@ class ApiService(
             }
 
             val body = response.body()
-                ?: return@withContext GenerateRepliesResult.Failure(
-                    "Empty response from server",
-                    response.code()
-                )
+            if (body == null) {
+                Log.e(TAG, "POST /generate-replies returned an empty body")
+                return@withContext GenerateRepliesResult.Failure(ReplyError.SERVER)
+            }
 
             val entitlement = body.toEntitlementState()
             cacheEntitlement(entitlement)
 
-            if (body.suggestions.isEmpty()) {
-                GenerateRepliesResult.Failure("No suggestions received from server")
+            val suggestions = body.suggestions.filter { it.isNotBlank() }
+            if (suggestions.isEmpty()) {
+                Log.e(TAG, "POST /generate-replies returned no usable suggestions")
+                GenerateRepliesResult.Failure(ReplyError.UNREADABLE)
             } else {
-                Log.d(TAG, "Received ${body.suggestions.size} suggestions")
+                Log.d(TAG, "Received ${suggestions.size} suggestions")
                 GenerateRepliesResult.Success(
-                    GeneratedReplies(body.suggestions, body.context, entitlement)
+                    GeneratedReplies(suggestions, body.context, entitlement)
                 )
             }
         } catch (e: Exception) {
+            // Everything the exception knows stops here, at Logcat.
             Log.e(TAG, "Error generating replies", e)
-            GenerateRepliesResult.Failure("Failed to generate replies: ${e.message}")
+            GenerateRepliesResult.Failure(e.toReplyError())
         }
+    }
+
+    /** Network exceptions, mapped onto the two things a user can act on. */
+    private fun Exception.toReplyError(): ReplyError = when (this) {
+        is SocketTimeoutException -> ReplyError.TIMEOUT
+        is UnknownHostException, is ConnectException, is SSLException -> ReplyError.NO_CONNECTION
+        // Covers the rest of the okhttp/IO family: a socket that died mid-call
+        // reads to the user as "no connection", because that's what it is.
+        is IOException -> ReplyError.NO_CONNECTION
+        else -> ReplyError.SERVER
     }
 
     /**
@@ -218,16 +241,18 @@ class ApiService(
             return GenerateRepliesResult.AllowanceExhausted(freeLimit, used)
         }
 
+        // The body can carry provider internals ("Groq rate limit reached for
+        // model …"), so it is logged and dropped — the user gets our copy.
         logHttpError(code, "POST /generate-replies")
-        val message = when (code) {
-            HTTP_BAD_REQUEST -> "Hook couldn't identify this install. Reopen the app and try again."
-            HTTP_UNAUTHORIZED -> "Hook couldn't sign in to the server."
-            // The AI provider's per-minute budget, not a broken server — say so
-            // rather than showing a bare HTTP code.
-            HTTP_TOO_MANY_REQUESTS -> "Too many requests right now. Try again in a moment."
-            else -> "Hook's server had a problem (HTTP $code)."
+        rawBody?.takeIf { it.isNotBlank() }?.let { Log.d(TAG, "Error body: $it") }
+        val error = when (code) {
+            HTTP_BAD_REQUEST, HTTP_UNAUTHORIZED -> ReplyError.SETUP
+            // The AI provider's per-minute budget, not a broken server: it
+            // clears on its own, so ask for patience rather than a retry loop.
+            HTTP_TOO_MANY_REQUESTS -> ReplyError.BUSY
+            else -> ReplyError.SERVER
         }
-        return GenerateRepliesResult.Failure(message, code)
+        return GenerateRepliesResult.Failure(error)
     }
 
     private fun logHttpError(code: Int, route: String) {

@@ -441,10 +441,12 @@ async def generate_replies(
                 continue
 
         if not suggestions or len(suggestions) < 3:
-            raise HTTPException(
-                status_code=500,
-                detail=f"AI generation failed: {str(last_error) if last_error else 'No valid suggestions'}"
-            )
+            # The provider's own words (model ids, quota wording, stack detail)
+            # stay in our logs: the client turns any 5xx into its own copy, and
+            # echoing upstream text back has only ever leaked internals.
+            print(f"[ERR] generation produced no usable suggestions: "
+                  f"{last_error if last_error else 'model returned nothing valid'}")
+            raise HTTPException(status_code=500, detail="AI generation failed")
 
         # Client holds the context; we pass its sent_replies through unchanged
         # and hand back either the freshly updated summary or the prior one.
@@ -479,7 +481,8 @@ async def generate_replies(
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Unexpected error: {str(e)}")
+        print(f"[ERR] unexpected failure in /generate-replies: {e!r}")
+        raise HTTPException(status_code=500, detail="Unexpected error")
 
 if __name__ == "__main__":
     import uvicorn
