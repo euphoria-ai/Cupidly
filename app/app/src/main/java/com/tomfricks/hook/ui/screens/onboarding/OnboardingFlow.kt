@@ -70,6 +70,7 @@ import com.tomfricks.hook.ui.theme.PebbleTextButton
 import com.tomfricks.hook.ui.theme.PebbleTone
 import com.tomfricks.hook.ui.theme.ProBadge
 import com.tomfricks.hook.utils.PermissionUtils
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
@@ -293,6 +294,7 @@ private fun QuestionStep(
     onContinue: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    var lockedNotice by remember(question.field) { mutableStateOf<String?>(null) }
     val selected = question.options.firstOrNull { it.value == answer }
     // Before anything is picked, preview the first answer rather than an empty
     // card — the point is to show what these words mean.
@@ -336,13 +338,37 @@ private fun QuestionStep(
             }
 
             items(question.options) { option ->
+                val locked = option.proOnly && !isPro
                 AnswerRow(
                     option = option,
                     selected = option.value == answer,
-                    showProBadge = option.proOnly && !isPro,
-                    onClick = { onAnswer(option.value) }
+                    showProBadge = locked,
+                    onClick = {
+                        if (locked) {
+                            // Say why nothing happened. A row that ignores taps
+                            // in silence reads as broken, not as locked.
+                            lockedNotice = option.label
+                        } else {
+                            lockedNotice = null
+                            onAnswer(option.value)
+                        }
+                    }
                 )
             }
+        }
+
+        lockedNotice?.let { label ->
+            Text(
+                text = "\"$label\" is part of Hook Pro — you can unlock it right " +
+                    "after setup.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 24.dp)
+                    .padding(bottom = 10.dp)
+            )
         }
 
         PebbleButton(
@@ -370,8 +396,8 @@ private fun AnswerRow(
         selected = selected,
         selectedTone = PebbleTone.SLATE,
         onClick = onClick,
-        // Marked, not locked: this is a preference, and being told "no" is a
-        // bad first conversation with an app.
+        // The badge is the whole explanation of why this row won't take: it is
+        // a Pro answer, and this user isn't Pro yet.
         trailing = if (showProBadge) {
             { ProBadge() }
         } else {
@@ -436,8 +462,20 @@ private fun EnableKeyboardStep(
         photos = PermissionUtils.hasPhotoAccess(context)
     }
 
-    // Every one of these steps happens in another app, so the answer can only
-    // have changed while we were away. Re-check on the way back in.
+    // The keyboard chooser is a system dialog drawn over this activity, not a
+    // separate one: picking Hook in it never pauses us, so ON_RESUME never
+    // fires and the tick would sit there grey until something else forced a
+    // recomposition. Polling is what actually catches the switch. Three cheap
+    // lookups, and only while this step is on screen.
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(400)
+            refresh()
+        }
+    }
+
+    // Returning from a full Settings screen *does* resume us, and instant beats
+    // waiting out the poll.
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) refresh()
@@ -475,6 +513,15 @@ private fun EnableKeyboardStep(
     )
     val nextIndex = tasks.indexOfFirst { !it.done }
     val next = tasks.getOrNull(nextIndex)
+
+    // Nothing left to ask for: move on by itself. Making someone tap Continue
+    // on a screen where every line is already ticked is just a toll booth.
+    LaunchedEffect(next == null) {
+        if (next == null) {
+            delay(700)  // let the last tick land where they can see it
+            onDone()
+        }
+    }
 
     Column(
         modifier = modifier

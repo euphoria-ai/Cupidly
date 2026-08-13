@@ -103,6 +103,13 @@ fun HookNavigation(paywallRequest: Int = 0) {
                         // come back to.
                         popUpTo(Screen.Welcome.route) { inclusive = true }
                     }
+                    // They have just been shown three Pro answers they weren't
+                    // allowed to pick. Ask for the upgrade here, while that's
+                    // still fresh — and push it on top of Home, so closing it
+                    // lands them in the app rather than back in onboarding.
+                    if (!isPro) {
+                        navController.navigate(Screen.Paywall.route)
+                    }
                 },
                 // Back out of the first question and you're on the last pitch
                 // slide again, which is where you came from.
