@@ -4,6 +4,7 @@ import android.app.Application
 import android.util.Log
 import com.tomfricks.hook.api.ApiService
 import com.tomfricks.hook.billing.BillingManager
+import com.tomfricks.hook.data.OnboardingSync
 import com.tomfricks.hook.data.PreferencesRepository
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -33,6 +34,11 @@ class HookApplication : Application() {
             // right before the user generates anything this session.
             ApiService(this@HookApplication).fetchEntitlement()
                 .onFailure { Log.d("HookApplication", "Entitlement refresh skipped: ${it.message}") }
+
+            // Catches the profile of anyone who finished onboarding while
+            // offline. A no-op for everyone else, including users who never
+            // finished and users whose profile already went out.
+            OnboardingSync.syncIfNeeded(this@HookApplication, preferencesRepository)
         }
     }
 }

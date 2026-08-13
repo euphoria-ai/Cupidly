@@ -596,3 +596,91 @@ async def test_secret_key_is_sent_as_bearer_token(monkeypatch):
     await entitlements.is_pro(USER)
     assert seen["auth"] == "Bearer sk_test"
     assert seen["path"] == f"/v1/subscribers/{USER}"
+
+
+# --- /onboarding ---------------------------------------------------------
+
+def _profile(**overrides):
+    body = {
+        "gender": "Male",
+        "sexuality": "Straight",
+        "age_range": "18-24",
+        "looking_for": "🔥 Fun & hookups",
+        "style": "LOWERCASE",
+        "tone": "GEN_Z_SLANG",
+        "flirt_level": "BOLD",
+    }
+    body.update(overrides)
+    return body
+
+
+def _saved_profile(store_obj, app_user_id=USER):
+    row = store_obj._conn.execute(
+        "SELECT gender, sexuality, age_range, looking_for, style, tone, "
+        "flirt_level FROM onboarding_profile WHERE app_user_id = ?",
+        (app_user_id,),
+    ).fetchone()
+    return row
+
+
+def test_onboarding_is_stored(client, store):
+    response = client.post("/onboarding", json=_profile(), headers=_headers())
+    assert response.status_code == 204
+    assert _saved_profile(store) == (
+        "Male", "Straight", "18-24", "🔥 Fun & hookups",
+        "LOWERCASE", "GEN_Z_SLANG", "BOLD",
+    )
+
+
+def test_onboarding_requires_auth(client, store):
+    response = client.post("/onboarding", json=_profile(),
+                           headers=_headers(api_key=None))
+    assert response.status_code == 401
+    assert _saved_profile(store) is None
+
+
+def test_onboarding_requires_app_user_id(client, store):
+    response = client.post("/onboarding", json=_profile(),
+                           headers=_headers(user_id=None))
+    assert response.status_code == 400
+    assert _saved_profile(store) is None
+
+
+def test_onboarding_retry_upserts_rather_than_duplicating(client, store):
+    """A client that lost the network mid-call retries; that must not stack rows."""
+    client.post("/onboarding", json=_profile(), headers=_headers())
+    client.post("/onboarding", json=_profile(tone="SMOOTH"), headers=_headers())
+
+    rows = store._conn.execute(
+        "SELECT tone FROM onboarding_profile WHERE app_user_id = ?",
+        (USER,),
+    ).fetchall()
+    assert rows == [("SMOOTH",)]
+
+
+def test_onboarding_accepts_a_partial_profile(client, store):
+    """A question the app hasn't asked yet arrives as null, not as an error."""
+    response = client.post(
+        "/onboarding",
+        json={"gender": "Female"},
+        headers=_headers(),
+    )
+    assert response.status_code == 204
+    assert _saved_profile(store) == ("Female", None, None, None, None, None, None)
+
+
+def test_onboarding_rejects_oversized_values(client, store):
+    response = client.post("/onboarding", json=_profile(gender="x" * 500),
+                           headers=_headers())
+    assert response.status_code == 422
+    assert _saved_profile(store) is None
+
+
+def test_onboarding_survives_a_broken_store(client, store, monkeypatch):
+    """The user has already finished; a store outage must not surface as an error."""
+    async def boom(*args, **kwargs):
+        raise RuntimeError("supabase is down")
+
+    monkeypatch.setattr(store, "save_onboarding_profile", boom)
+    response = client.post("/onboarding", json=_profile(), headers=_headers())
+    assert response.status_code == 204

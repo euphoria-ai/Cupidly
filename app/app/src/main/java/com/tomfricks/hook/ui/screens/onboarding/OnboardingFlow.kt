@@ -35,6 +35,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateMapOf
@@ -58,6 +59,7 @@ import androidx.lifecycle.LifecycleEventObserver
 import com.tomfricks.hook.data.AnswerOption
 import com.tomfricks.hook.data.OnboardingField
 import com.tomfricks.hook.data.OnboardingQuestion
+import com.tomfricks.hook.data.OnboardingSync
 import com.tomfricks.hook.data.PreferencesRepository
 import com.tomfricks.hook.data.ProfileQuestions
 import com.tomfricks.hook.data.StyleQuestions
@@ -68,23 +70,58 @@ import com.tomfricks.hook.ui.theme.PebbleTextButton
 import com.tomfricks.hook.ui.theme.PebbleTone
 import com.tomfricks.hook.ui.theme.ProBadge
 import com.tomfricks.hook.utils.PermissionUtils
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
 /** One screen of onboarding. The list of these *is* the flow. */
 private sealed interface Step {
+
+    /**
+     * Stable name for this step, used to resume where the user left off. It
+     * outlives reordering, which an index would not.
+     */
+    val key: String
+
+    /**
+     * A step past which the user is never sent back — because what happens
+     * there can't be repeated. Reaching one records it, so a crash or a
+     * force-quit resumes here instead of at the first question.
+     */
+    val checkpoint: Boolean get() = false
+
     /** A question with a fixed set of answers. */
-    data class Ask(val question: OnboardingQuestion) : Step
+    data class Ask(val question: OnboardingQuestion) : Step {
+        override val key: String get() = question.field.name
+    }
 
     /** The system setup: enable the keyboard, switch to it, allow photos. */
-    data object EnableKeyboard : Step
+    data object EnableKeyboard : Step {
+        override val key = "keyboard"
+    }
+
+    /** Hook used for real, on a stand-in conversation. */
+    data object Demo : Step {
+        override val key = "demo"
+        override val checkpoint = true
+    }
+
+    /** The beat after the demo lands. */
+    data object Smooth : Step {
+        override val key = "smooth"
+        override val checkpoint = true
+    }
 
     /** Everything is set; the only way out is into the app. */
-    data object Done : Step
+    data object Done : Step {
+        override val key = "done"
+    }
 }
 
 private val Steps: List<Step> =
     ProfileQuestions.map { Step.Ask(it) } +
         Step.EnableKeyboard +
+        Step.Demo +
+        Step.Smooth +
         StyleQuestions.map { Step.Ask(it) } +
         Step.Done
 
@@ -108,15 +145,47 @@ fun OnboardingFlow(
     preferencesRepository: PreferencesRepository,
     isPro: Boolean = false
 ) {
+    val context = LocalContext.current
     var index by remember { mutableIntStateOf(0) }
+
+    /** The earliest step still reachable — raised by every checkpoint passed. */
+    var floor by remember { mutableIntStateOf(0) }
+    var restored by remember { mutableStateOf(false) }
     val answers = remember { mutableStateMapOf<OnboardingField, String>() }
     var showWhyWeAsk by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
 
+    // Resume where they got to. Nothing renders until this has been read, so a
+    // returning user never sees the first question flash past.
+    LaunchedEffect(Unit) {
+        val saved = preferencesRepository.onboardingCheckpointFlow.first()
+        val savedIndex = Steps.indexOfFirst { it.key == saved }
+        if (savedIndex > 0) {
+            index = savedIndex
+            floor = savedIndex
+        }
+        restored = true
+    }
+
+    if (!restored) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(MaterialTheme.colorScheme.background)
+        )
+        return
+    }
+
     val step = Steps[index]
 
     fun back() {
-        if (index == 0) onBackFromStart() else index--
+        when {
+            // A checkpoint is a one-way door: the demo can't be un-run, and the
+            // applause after it can't be un-earned.
+            index > floor -> index--
+            floor == 0 -> onBackFromStart()
+            else -> Unit
+        }
     }
 
     fun forward() {
@@ -126,10 +195,20 @@ fun OnboardingFlow(
         scope.launch {
             preferencesRepository.updateOnboardingAnswers(answers.toMap())
             if (index < Steps.lastIndex) {
-                index++
+                val next = index + 1
+                index = next
+                val arriving = Steps[next]
+                if (arriving.checkpoint) {
+                    floor = next
+                    preferencesRepository.setOnboardingCheckpoint(arriving.key)
+                }
             } else {
+                // Recorded first, sent second: the flag is what guarantees the
+                // user never sees any of this again, and it must not depend on
+                // the network.
                 preferencesRepository.setOnboardingCompleted()
                 onComplete()
+                OnboardingSync.syncIfNeeded(context, preferencesRepository)
             }
         }
     }
@@ -141,11 +220,15 @@ fun OnboardingFlow(
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.background)
     ) {
-        FlowTopBar(
-            progress = (index + 1).toFloat() / Steps.size,
-            onBack = ::back,
-            onHelp = { showWhyWeAsk = true }
-        )
+        // The demo is pretending to be another app; our chrome would give the
+        // game away, so it gets the whole screen.
+        if (step != Step.Demo) {
+            FlowTopBar(
+                progress = (index + 1).toFloat() / Steps.size,
+                onBack = ::back,
+                onHelp = { showWhyWeAsk = true }
+            )
+        }
 
         when (step) {
             is Step.Ask -> QuestionStep(
@@ -159,6 +242,16 @@ fun OnboardingFlow(
 
             Step.EnableKeyboard -> EnableKeyboardStep(
                 onDone = ::forward,
+                modifier = Modifier.weight(1f)
+            )
+
+            Step.Demo -> DemoChatStep(
+                onFinished = ::forward,
+                modifier = Modifier.weight(1f)
+            )
+
+            Step.Smooth -> SmoothStep(
+                onContinue = ::forward,
                 modifier = Modifier.weight(1f)
             )
 

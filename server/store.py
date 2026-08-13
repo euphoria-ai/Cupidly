@@ -19,7 +19,20 @@ from typing import Optional
 
 DEFAULT_SQLITE_PATH = "./allowance.db"
 ALLOWANCE_TABLE = "allowance"
+ONBOARDING_TABLE = "onboarding_profile"
 INCREMENT_RPC = "increment_allowance"
+
+# The onboarding answers we keep, in column order. Anything not in this tuple
+# never reaches the database.
+ONBOARDING_FIELDS = (
+    "gender",
+    "sexuality",
+    "age_range",
+    "looking_for",
+    "style",
+    "tone",
+    "flirt_level",
+)
 
 # INSERT ... RETURNING landed in SQLite 3.35; older builds need a second SELECT.
 _SQLITE_HAS_RETURNING = sqlite3.sqlite_version_info >= (3, 35, 0)
@@ -39,6 +52,10 @@ class AllowanceStore(ABC):
     @abstractmethod
     async def increment(self, app_user_id: str) -> int:
         """Spend one generation. Returns the new total."""
+
+    @abstractmethod
+    async def save_onboarding_profile(self, app_user_id: str, profile: dict) -> None:
+        """Record a finished onboarding. Upsert: re-running it must not stack rows."""
 
     async def close(self) -> None:
         """Release any connections. Safe to call more than once."""
@@ -71,6 +88,14 @@ class SqliteAllowanceStore(AllowanceStore):
                     app_user_id TEXT PRIMARY KEY,
                     used INTEGER NOT NULL DEFAULT 0,
                     updated_at TEXT
+                )
+            """)
+            columns = ",\n                    ".join(f"{f} TEXT" for f in ONBOARDING_FIELDS)
+            self._conn.execute(f"""
+                CREATE TABLE IF NOT EXISTS onboarding_profile (
+                    app_user_id TEXT PRIMARY KEY,
+                    {columns},
+                    completed_at TEXT
                 )
             """)
             self._conn.commit()
@@ -116,11 +141,38 @@ class SqliteAllowanceStore(AllowanceStore):
             self._conn.commit()
             return int(row[0]) if row else 0
 
+    def _save_onboarding_sync(self, app_user_id: str, profile: dict) -> None:
+        columns = ("app_user_id",) + ONBOARDING_FIELDS + ("completed_at",)
+        values = (
+            [app_user_id]
+            + [profile.get(f) for f in ONBOARDING_FIELDS]
+            + [_now_iso()]
+        )
+        placeholders = ", ".join("?" for _ in columns)
+        # Onboarding finishes once, but a retry after a flaky network must not
+        # create a second row — hence upsert on the install id.
+        updates = ", ".join(
+            f"{c} = excluded.{c}" for c in ONBOARDING_FIELDS + ("completed_at",)
+        )
+        with self._lock:
+            self._conn.execute(
+                f"""
+                INSERT INTO onboarding_profile ({", ".join(columns)})
+                VALUES ({placeholders})
+                ON CONFLICT(app_user_id) DO UPDATE SET {updates}
+                """,
+                values,
+            )
+            self._conn.commit()
+
     async def get_used(self, app_user_id: str) -> int:
         return await asyncio.to_thread(self._get_used_sync, app_user_id)
 
     async def increment(self, app_user_id: str) -> int:
         return await asyncio.to_thread(self._increment_sync, app_user_id)
+
+    async def save_onboarding_profile(self, app_user_id: str, profile: dict) -> None:
+        await asyncio.to_thread(self._save_onboarding_sync, app_user_id, profile)
 
     async def close(self) -> None:
         await asyncio.to_thread(self._close_sync)
@@ -227,6 +279,16 @@ class SupabaseAllowanceStore(AllowanceStore):
         if isinstance(data, dict):
             data = data.get(INCREMENT_RPC, data.get("used", 0))
         return int(data or 0)
+
+    async def save_onboarding_profile(self, app_user_id: str, profile: dict) -> None:
+        fallback = await self._ensure_ready()
+        if fallback is not None:
+            return await fallback.save_onboarding_profile(app_user_id, profile)
+
+        row = {"app_user_id": app_user_id}
+        row.update({f: profile.get(f) for f in ONBOARDING_FIELDS})
+        row["completed_at"] = _now_iso()
+        await self._client.table(ONBOARDING_TABLE).upsert(row).execute()
 
     async def close(self) -> None:
         self._client = None

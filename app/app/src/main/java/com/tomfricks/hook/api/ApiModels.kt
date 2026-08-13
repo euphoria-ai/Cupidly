@@ -60,6 +60,27 @@ data class GenerateRepliesResponse(
     val remaining: Int = 0
 )
 
+/**
+ * Body of `POST /onboarding` — what onboarding learned, sent once when the flow
+ * finishes. Field names mirror the server's columns.
+ */
+data class OnboardingProfileRequest(
+    @SerializedName("gender")
+    val gender: String? = null,
+    @SerializedName("sexuality")
+    val sexuality: String? = null,
+    @SerializedName("age_range")
+    val ageRange: String? = null,
+    @SerializedName("looking_for")
+    val lookingFor: String? = null,
+    @SerializedName("style")
+    val style: String? = null,
+    @SerializedName("tone")
+    val tone: String? = null,
+    @SerializedName("flirt_level")
+    val flirtLevel: String? = null
+)
+
 /** Body of `GET /me` — entitlement + allowance for this install. */
 data class MeResponse(
     @SerializedName("app_user_id")

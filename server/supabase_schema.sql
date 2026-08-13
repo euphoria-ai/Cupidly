@@ -45,3 +45,27 @@ $$;
 -- Only the server (service role) may call it.
 revoke all on function public.increment_allowance(text) from public, anon, authenticated;
 grant execute on function public.increment_allowance(text) to service_role;
+
+
+-- One row per install, written once when onboarding finishes. Product data:
+-- who the user says they are and how they want their replies written. Still no
+-- screenshots, no messages, no replies.
+--
+-- Note this holds self-declared sexuality and age band. Treat it as personal
+-- data: it is keyed by the opaque install id, never by anything identifying,
+-- and it is locked to the service role exactly like the allowance table.
+create table if not exists public.onboarding_profile (
+    app_user_id  text primary key,
+    gender       text,
+    sexuality    text,
+    age_range    text,
+    looking_for  text,
+    style        text,
+    tone         text,
+    flirt_level  text,
+    completed_at timestamptz not null default now()
+);
+
+alter table public.onboarding_profile enable row level security;
+
+revoke all on table public.onboarding_profile from anon, authenticated;

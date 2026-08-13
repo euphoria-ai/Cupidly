@@ -49,6 +49,8 @@ class PreferencesRepository(private val context: Context) {
         val PROFILE_AGE_RANGE = stringPreferencesKey("profile_age_range")
         val PROFILE_LOOKING_FOR = stringPreferencesKey("profile_looking_for")
         val HAS_COMPLETED_ONBOARDING = booleanPreferencesKey("has_completed_onboarding")
+        val ONBOARDING_CHECKPOINT = stringPreferencesKey("onboarding_checkpoint")
+        val ONBOARDING_SYNCED = booleanPreferencesKey("onboarding_synced")
         val APP_USER_ID = stringPreferencesKey("app_user_id")
         val IS_PRO = booleanPreferencesKey("is_pro")
         val FREE_USED = intPreferencesKey("free_used")
@@ -86,6 +88,23 @@ class PreferencesRepository(private val context: Context) {
         )
     }
     
+    /**
+     * The furthest checkpoint onboarding has reached, or null if none.
+     *
+     * Onboarding is long and hands the user off to other apps twice, so the
+     * milestones that can't be repeated — the live demo, and the applause after
+     * it — record themselves here. A relaunch resumes from the last one instead
+     * of starting the whole thing again.
+     */
+    val onboardingCheckpointFlow: Flow<String?> = context.dataStore.data.map { preferences ->
+        preferences[PreferencesKeys.ONBOARDING_CHECKPOINT]
+    }
+
+    /** True once the finished onboarding profile has reached the server. */
+    val onboardingSyncedFlow: Flow<Boolean> = context.dataStore.data.map { preferences ->
+        preferences[PreferencesKeys.ONBOARDING_SYNCED] ?: false
+    }
+
     /** The install id, once it exists. Null until [getOrCreateAppUserId] has run. */
     val appUserIdFlow: Flow<String?> = context.dataStore.data.map { preferences ->
         preferences[PreferencesKeys.APP_USER_ID]
@@ -222,9 +241,26 @@ class PreferencesRepository(private val context: Context) {
         OnboardingField.FLIRT_LEVEL -> PreferencesKeys.FLIRT_LEVEL
     }
 
+    /** Remember a point the user should never be sent back before. */
+    suspend fun setOnboardingCheckpoint(checkpoint: String) {
+        context.dataStore.edit { preferences ->
+            preferences[PreferencesKeys.ONBOARDING_CHECKPOINT] = checkpoint
+        }
+    }
+
     suspend fun setOnboardingCompleted() {
         context.dataStore.edit { preferences ->
             preferences[PreferencesKeys.HAS_COMPLETED_ONBOARDING] = true
+            // Nothing left to resume; the flag above is what keeps the flow from
+            // ever being shown again.
+            preferences.remove(PreferencesKeys.ONBOARDING_CHECKPOINT)
+        }
+    }
+
+    /** The finished profile is on the server; don't send it again. */
+    suspend fun setOnboardingSynced() {
+        context.dataStore.edit { preferences ->
+            preferences[PreferencesKeys.ONBOARDING_SYNCED] = true
         }
     }
     

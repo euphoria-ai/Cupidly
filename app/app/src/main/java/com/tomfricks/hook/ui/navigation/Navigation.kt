@@ -1,9 +1,14 @@
 package com.tomfricks.hook.ui.navigation
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -42,17 +47,33 @@ fun HookNavigation(paywallRequest: Int = 0) {
     val app = context.applicationContext as HookApplication
     val preferencesRepository = app.preferencesRepository
 
+    // Deliberately null until DataStore answers, rather than a default-valued
+    // UserPreferences. A default says "onboarding not done", which would send
+    // someone who finished months ago back to the first slide for a frame —
+    // and NavHost fixes its start destination on first composition, so that
+    // frame is not harmless.
     val userPreferences by preferencesRepository.userPreferencesFlow.collectAsState(
-        initial = com.tomfricks.hook.data.UserPreferences()
+        initial = null
     )
     val isPro by BillingManager.isPro.collectAsState()
 
     val navController = rememberNavController()
 
+    val preferences = userPreferences
+    if (preferences == null) {
+        // One frame of the app's own background while the answer arrives.
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(MaterialTheme.colorScheme.background)
+        )
+        return
+    }
+
     // First run opens on the pitch, not on a permission request: Welcome ->
-    // Onboarding -> Home. Only Onboarding marks the flow complete, so quitting
-    // mid-carousel starts over rather than skipping setup.
-    val startDestination = if (userPreferences.hasCompletedOnboarding) {
+    // Onboarding -> Home. Onboarding is what marks the flow complete, and it is
+    // never shown again once it has.
+    val startDestination = if (preferences.hasCompletedOnboarding) {
         Screen.Home.route
     } else {
         Screen.Welcome.route
@@ -106,7 +127,7 @@ fun HookNavigation(paywallRequest: Int = 0) {
                     navController.navigate(Screen.CustomerCenter.route)
                 },
                 preferencesRepository = preferencesRepository,
-                userPreferences = userPreferences,
+                userPreferences = preferences,
                 isPro = isPro
             )
         }

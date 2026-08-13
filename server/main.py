@@ -156,6 +156,22 @@ class GenerateRepliesResponse(BaseModel):
     free_limit: int = 0
     remaining: int = 0
 
+class OnboardingProfileRequest(BaseModel):
+    """What onboarding learned, sent once when the flow finishes.
+
+    Every field is optional and length-capped: a question the app hasn't asked
+    yet simply arrives as None, and nothing here is ever echoed back to a
+    client, so it only needs to be small enough to store.
+    """
+    gender: Optional[str] = Field(default=None, max_length=64)
+    sexuality: Optional[str] = Field(default=None, max_length=64)
+    age_range: Optional[str] = Field(default=None, max_length=32)
+    looking_for: Optional[str] = Field(default=None, max_length=64)
+    style: Optional[str] = Field(default=None, max_length=32)
+    tone: Optional[str] = Field(default=None, max_length=32)
+    flirt_level: Optional[str] = Field(default=None, max_length=32)
+
+
 class MeResponse(BaseModel):
     app_user_id: str
     is_pro: bool
@@ -331,6 +347,27 @@ async def refresh_entitlement(app_user_id: str = Depends(authenticate)):
     """
     invalidate(app_user_id)
     return await _entitlement_snapshot(app_user_id)
+
+
+@app.post("/onboarding", status_code=204)
+async def save_onboarding(
+    profile: OnboardingProfileRequest,
+    app_user_id: str = Depends(authenticate),
+):
+    """Record a finished onboarding for this install.
+
+    The app calls this once, after the last screen. It is an upsert, so a retry
+    from a client that lost the network mid-call is harmless.
+
+    A failure here must never cost the user anything — they have already
+    finished onboarding — so a store that is down is logged and swallowed
+    rather than turned into an error the app has to handle.
+    """
+    try:
+        await store.save_onboarding_profile(app_user_id, profile.model_dump())
+    except Exception as e:
+        print(f"[ERR] could not save onboarding profile for {app_user_id}: {e}")
+    return None
 
 
 @app.post(
