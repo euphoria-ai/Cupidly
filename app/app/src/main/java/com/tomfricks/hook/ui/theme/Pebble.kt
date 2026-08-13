@@ -207,16 +207,20 @@ fun PebbleButton(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     tone: PebbleTone = PebbleTone.BLUE,
-    fillWidth: Boolean = true
+    fillWidth: Boolean = true,
+    enabled: Boolean = true
 ) {
     val contentColor = if (tone == PebbleTone.MUTED) {
         MaterialTheme.colorScheme.onSurface
     } else {
         Color.White
     }
+    val sized = if (fillWidth) modifier.fillMaxWidth() else modifier
     PebbleSurface(
-        onClick = onClick,
-        modifier = if (fillWidth) modifier.fillMaxWidth() else modifier,
+        // Same idiom as PebbleActionPill: a null onClick makes the surface
+        // inert, and the dimming is what says so.
+        onClick = if (enabled) onClick else null,
+        modifier = if (enabled) sized else sized.alpha(0.5f),
         tone = tone
     ) {
         Text(
@@ -447,6 +451,10 @@ fun PebbleDialog(
  *
  * [trailing] is an optional slot pinned to the right edge — used for the "PRO"
  * badge on subscription-gated choices.
+ *
+ * [selectedTone] picks the chosen-state fill. Settings dialogs keep the blue;
+ * onboarding answers use [PebbleTone.SLATE], where a whole column of blue would
+ * shout over the question it belongs to.
  */
 @Composable
 fun PebbleOption(
@@ -454,9 +462,10 @@ fun PebbleOption(
     selected: Boolean,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
+    selectedTone: PebbleTone = PebbleTone.BLUE,
     trailing: (@Composable () -> Unit)? = null
 ) {
-    val tone = if (selected) PebbleTone.BLUE else PebbleTone.MUTED
+    val tone = if (selected) selectedTone else PebbleTone.MUTED
     val contentColor = if (selected) Color.White else MaterialTheme.colorScheme.onSurface
     PebbleSurface(
         onClick = onClick,

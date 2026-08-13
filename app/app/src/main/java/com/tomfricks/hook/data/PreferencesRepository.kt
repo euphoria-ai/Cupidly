@@ -46,6 +46,8 @@ class PreferencesRepository(private val context: Context) {
         val PROFILE_SEXUALITY = stringPreferencesKey("profile_sexuality")
         val PROFILE_BIO = stringPreferencesKey("profile_bio")
         val PROFILE_PRONOUNS = stringPreferencesKey("profile_pronouns")
+        val PROFILE_AGE_RANGE = stringPreferencesKey("profile_age_range")
+        val PROFILE_LOOKING_FOR = stringPreferencesKey("profile_looking_for")
         val HAS_COMPLETED_ONBOARDING = booleanPreferencesKey("has_completed_onboarding")
         val APP_USER_ID = stringPreferencesKey("app_user_id")
         val IS_PRO = booleanPreferencesKey("is_pro")
@@ -78,6 +80,8 @@ class PreferencesRepository(private val context: Context) {
             profileSexuality = preferences[PreferencesKeys.PROFILE_SEXUALITY] ?: "",
             profileBio = preferences[PreferencesKeys.PROFILE_BIO] ?: "",
             profilePronouns = preferences[PreferencesKeys.PROFILE_PRONOUNS] ?: "",
+            profileAgeRange = preferences[PreferencesKeys.PROFILE_AGE_RANGE] ?: "",
+            profileLookingFor = preferences[PreferencesKeys.PROFILE_LOOKING_FOR] ?: "",
             hasCompletedOnboarding = preferences[PreferencesKeys.HAS_COMPLETED_ONBOARDING] ?: false
         )
     }
@@ -184,6 +188,28 @@ class PreferencesRepository(private val context: Context) {
         }
     }
     
+    /**
+     * Store the onboarding survey's answers in one write, so a half-saved
+     * profile can't survive the app being killed mid-flow.
+     *
+     * Only non-blank answers are written: a question the flow doesn't ask yet
+     * must not wipe an answer given somewhere else.
+     */
+    suspend fun updateOnboardingProfile(answers: Map<ProfileField, String>) {
+        context.dataStore.edit { preferences ->
+            answers.forEach { (field, answer) ->
+                if (answer.isNotBlank()) preferences[field.key()] = answer
+            }
+        }
+    }
+
+    private fun ProfileField.key() = when (this) {
+        ProfileField.GENDER -> PreferencesKeys.PROFILE_GENDER
+        ProfileField.SEXUALITY -> PreferencesKeys.PROFILE_SEXUALITY
+        ProfileField.AGE_RANGE -> PreferencesKeys.PROFILE_AGE_RANGE
+        ProfileField.LOOKING_FOR -> PreferencesKeys.PROFILE_LOOKING_FOR
+    }
+
     suspend fun setOnboardingCompleted() {
         context.dataStore.edit { preferences ->
             preferences[PreferencesKeys.HAS_COMPLETED_ONBOARDING] = true
@@ -203,6 +229,8 @@ class PreferencesRepository(private val context: Context) {
             preferences[PreferencesKeys.PROFILE_SEXUALITY] = userPreferences.profileSexuality
             preferences[PreferencesKeys.PROFILE_BIO] = userPreferences.profileBio
             preferences[PreferencesKeys.PROFILE_PRONOUNS] = userPreferences.profilePronouns
+            preferences[PreferencesKeys.PROFILE_AGE_RANGE] = userPreferences.profileAgeRange
+            preferences[PreferencesKeys.PROFILE_LOOKING_FOR] = userPreferences.profileLookingFor
             preferences[PreferencesKeys.HAS_COMPLETED_ONBOARDING] = userPreferences.hasCompletedOnboarding
         }
     }
