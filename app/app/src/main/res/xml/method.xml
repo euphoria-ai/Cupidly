@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <input-method xmlns:android="http://schemas.android.com/apk/res/android"
-    android:settingsActivity="com.tomfricks.cupidly.MainActivity"
+    android:settingsActivity="com.tomfricks.hook.MainActivity"
     android:supportsSwitchingToNextInputMethod="true" />
 

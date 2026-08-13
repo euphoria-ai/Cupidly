@@ -15,7 +15,7 @@ os.environ["GROQ_API_KEY"] = "test-groq-key"
 os.environ["APP_API_KEY"] = "test-app-api-key"
 os.environ["FREE_GENERATION_LIMIT"] = "3"
 os.environ["ALLOWANCE_DB_PATH"] = os.path.join(
-    tempfile.mkdtemp(prefix="cupidly-generate-"), "allowance.db"
+    tempfile.mkdtemp(prefix="hook-generate-"), "allowance.db"
 )
 os.environ.pop("SUPABASE_URL", None)
 os.environ.pop("SUPABASE_SERVICE_ROLE_KEY", None)
@@ -115,7 +115,7 @@ def test_root_reports_online(client):
     assert response.status_code == 200
     payload = response.json()
     assert payload["status"] == "online"
-    assert payload["service"] == "Cupidly"
+    assert payload["service"] == "Hook"
     assert payload["version"] == main.APP_VERSION
 
 

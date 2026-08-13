@@ -14,7 +14,7 @@ os.environ.setdefault("APP_API_KEY", "test-app-api-key")
 os.environ.setdefault("FREE_GENERATION_LIMIT", "3")
 os.environ.setdefault(
     "ALLOWANCE_DB_PATH",
-    os.path.join(tempfile.mkdtemp(prefix="cupidly-helpers-"), "allowance.db"),
+    os.path.join(tempfile.mkdtemp(prefix="hook-helpers-"), "allowance.db"),
 )
 os.environ.pop("SUPABASE_URL", None)
 os.environ.pop("SUPABASE_SERVICE_ROLE_KEY", None)

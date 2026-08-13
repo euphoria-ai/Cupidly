@@ -24,7 +24,7 @@ export default function Footer() {
             href={site.tiktokUrl}
             target="_blank"
             rel="noopener noreferrer"
-            aria-label="Cupidly on TikTok"
+            aria-label="Hook on TikTok"
             className={linkClass}
           >
             <svg
@@ -41,7 +41,7 @@ export default function Footer() {
             href={site.instagramUrl}
             target="_blank"
             rel="noopener noreferrer"
-            aria-label="Cupidly on Instagram"
+            aria-label="Hook on Instagram"
             className={linkClass}
           >
             <svg

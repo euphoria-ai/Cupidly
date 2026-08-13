@@ -34,7 +34,7 @@ val hasReleaseSigning = listOf(
 // Add these keys to local.properties (one per line, no quotes, no spaces
 // around the "=") to wire the app up for real:
 //   REVENUECAT_PUBLIC_SDK_KEY=test_XXXXXXXXXXXXXXXXXXXXXXXXXXX
-//   APP_API_KEY=the-shared-key-the-Cupidly-server-expects
+//   APP_API_KEY=the-shared-key-the-Hook-server-expects
 //
 // The key prefix decides which store the SDK talks to, and the SDK works it out
 // on its own — `goog_` drives real Google Play Billing, `test_` drives
@@ -50,7 +50,7 @@ fun secretLiteral(name: String): String {
 }
 
 android {
-    namespace = "com.tomfricks.cupidly"
+    namespace = "com.tomfricks.hook"
     compileSdk = 35
 
     defaultConfig {

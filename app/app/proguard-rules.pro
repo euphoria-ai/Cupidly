@@ -22,7 +22,7 @@
 -keep,allowobfuscation,allowshrinking class kotlin.coroutines.Continuation
 
 # Keep the API interface(s) and their annotated methods.
--keep interface com.tomfricks.cupidly.api.** { *; }
+-keep interface com.tomfricks.hook.api.** { *; }
 
 # Retrofit optionally uses the platform Optional/annotation types.
 -dontwarn retrofit2.**
@@ -63,7 +63,7 @@
 # App model / DTO classes used for Gson (de)serialization.
 # These are (de)serialized reflectively, so keep the classes and their fields.
 # ---------------------------------------------------------------------------
--keep class com.tomfricks.cupidly.api.** { *; }
+-keep class com.tomfricks.hook.api.** { *; }
 
 # ---------------------------------------------------------------------------
 # Kotlin coroutines

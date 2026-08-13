@@ -37,7 +37,7 @@ _client = AsyncOpenAI(
 )
 
 app = FastAPI(
-    title="Cupidly",
+    title="Hook",
     description="Backend service",
     version=APP_VERSION
 )
@@ -293,7 +293,7 @@ def _remaining(free_used: int) -> int:
 
 @app.get("/")
 async def root():
-    return {"status": "online", "service": "Cupidly", "version": APP_VERSION}
+    return {"status": "online", "service": "Hook", "version": APP_VERSION}
 
 
 async def _entitlement_snapshot(app_user_id: str) -> MeResponse:

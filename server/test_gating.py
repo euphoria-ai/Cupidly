@@ -18,7 +18,7 @@ os.environ["GROQ_API_KEY"] = "test-groq-key"
 os.environ["APP_API_KEY"] = "test-app-api-key"
 os.environ["FREE_GENERATION_LIMIT"] = "3"
 os.environ["ALLOWANCE_DB_PATH"] = os.path.join(
-    tempfile.mkdtemp(prefix="cupidly-test-"), "allowance.db"
+    tempfile.mkdtemp(prefix="hook-test-"), "allowance.db"
 )
 os.environ.pop("SUPABASE_URL", None)
 os.environ.pop("SUPABASE_SERVICE_ROLE_KEY", None)

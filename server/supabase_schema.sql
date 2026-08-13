@@ -1,4 +1,4 @@
--- Cupidly / Hook — allowance schema.
+-- Hook / Hook — allowance schema.
 -- Run this ONCE in the Supabase SQL editor (Dashboard > SQL Editor > New query),
 -- then set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY on the server.
 -- Safe to re-run: everything here is idempotent.
