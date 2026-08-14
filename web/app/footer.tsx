@@ -21,20 +21,22 @@ export default function Footer() {
         </nav>
         <div className="flex items-center gap-4">
           <a
-            href={site.tiktokUrl}
+            href={site.xUrl}
             target="_blank"
             rel="noopener noreferrer"
-            aria-label="Hook on TikTok"
+            aria-label="Hook on X"
             className={linkClass}
           >
+            {/* Padded viewBox: the solid X fills more of its box than the
+                outlined Instagram glyph, so inset it to match optically. */}
             <svg
-              viewBox="0 0 24 24"
+              viewBox="-2 -2 28 28"
               width="16"
               height="16"
               fill="currentColor"
               aria-hidden="true"
             >
-              <path d="M16.6 5.82A4.28 4.28 0 0 1 15.54 3h-3.09v12.4a2.59 2.59 0 0 1-2.59 2.5 2.59 2.59 0 1 1 .77-5.06V9.7a5.67 5.67 0 0 0-.77-.05A5.65 5.65 0 1 0 15.54 15.3V8.99a7.34 7.34 0 0 0 4.28 1.37V7.27a4.28 4.28 0 0 1-3.22-1.45z" />
+              <path d="M18.24 2.25h3.31l-7.23 8.26 8.5 11.24h-6.66l-5.21-6.82-5.96 6.82H1.68l7.73-8.84L1.25 2.25h6.83l4.71 6.23zm-1.16 17.52h1.83L7.08 4.13H5.11z" />
             </svg>
           </a>
           <a

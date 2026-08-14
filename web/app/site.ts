@@ -5,7 +5,7 @@ export const site = {
   supportEmail: "support@cupidly.app",
   playStoreUrl:
     "https://play.google.com/store/apps/details?id=app.hook",
-  tiktokUrl: "https://www.tiktok.com/@hook",
-  instagramUrl: "https://www.instagram.com/hook",
+  xUrl: "https://x.com/try_hook",
+  instagramUrl: "https://www.instagram.com/try_hook/",
   lastUpdated: "August 11, 2026",
 };

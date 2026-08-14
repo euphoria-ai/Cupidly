@@ -46,11 +46,11 @@ export default function Contact() {
         <p className="flex gap-4">
           <a
             className="underline underline-offset-4"
-            href={site.tiktokUrl}
+            href={site.xUrl}
             target="_blank"
             rel="noopener noreferrer"
           >
-            TikTok
+            X
           </a>
           <a
             className="underline underline-offset-4"
