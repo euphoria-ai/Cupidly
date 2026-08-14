@@ -3,29 +3,42 @@ package com.tomfricks.hook.ui.screens.paywall
 import android.app.Activity
 import android.content.Context
 import android.content.ContextWrapper
-import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.IntrinsicSize
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.defaultMinSize
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -36,62 +49,59 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import com.revenuecat.purchases.CustomerInfo
-import com.revenuecat.purchases.Offering
+import androidx.compose.ui.unit.sp
 import com.revenuecat.purchases.Package
 import com.revenuecat.purchases.PackageType
-import com.revenuecat.purchases.models.StoreTransaction
-import com.revenuecat.purchases.ui.revenuecatui.Paywall
-import com.revenuecat.purchases.ui.revenuecatui.PaywallListener
-import com.revenuecat.purchases.ui.revenuecatui.PaywallOptions
 import com.tomfricks.hook.billing.BillingManager
 import com.tomfricks.hook.billing.BillingOperation
 import com.tomfricks.hook.billing.OfferingsState
 import com.tomfricks.hook.billing.PurchaseResult
-import com.tomfricks.hook.ui.theme.PebbleButton
-import com.tomfricks.hook.ui.theme.PebbleIconButton
-import com.tomfricks.hook.ui.theme.PebbleSurface
-import com.tomfricks.hook.ui.theme.PebbleTextButton
-import com.tomfricks.hook.ui.theme.PebbleTone
+import com.tomfricks.hook.ui.theme.isPebbleDark
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
+import java.text.NumberFormat
+import java.util.Currency
+import java.util.Locale
+import kotlin.math.abs
 import kotlin.math.roundToInt
+import kotlin.math.roundToLong
 
 private const val TERMS_URL = "https://cupidly.app/terms"
 private const val PRIVACY_URL = "https://cupidly.app/privacy"
 
 private val PRO_BENEFITS = listOf(
-    "Unlimited rizz — no more free-generation counter",
-    "Every tone, including Gen-Z Slang and Respectful",
-    "Bold flirt level and Extended replies",
-    "Priority on new Hook features"
+    "Unlimited text suggestions",
+    "Get more matches + dates",
+    "Improve your texting game"
 )
 
 /**
  * The paywall route.
  *
- * Prefers RevenueCat's dashboard-configured Paywall so pricing, copy and layout
- * can be changed without shipping an app update. Falls back to the hand-rolled
- * Pebble paywall when there is nothing to render remotely — no current offering,
- * no paywall attached to it, a failed fetch, or no SDK key at all — because a
- * blank screen at the moment of purchase is the worst possible outcome.
+ * Deliberately hand-rolled rather than RevenueCat's dashboard-configured
+ * Paywall: the layout below is the one we want, and the hosted templates can't
+ * reproduce it. Packages, prices and the purchase flow still come straight from
+ * the SDK — nothing about the plan line-up is hardcoded, it renders whatever the
+ * current offering says.
  */
 @Composable
 fun PaywallScreen(
     onNavigateBack: () -> Unit
 ) {
     val isAvailable by BillingManager.isAvailable.collectAsState()
-    val offeringsState by BillingManager.offeringsState.collectAsState()
 
     // Keyed on isAvailable, not Unit: on a cold start the SDK is still being
     // configured when this screen composes, both refreshes no-op, and the
@@ -103,105 +113,76 @@ fun PaywallScreen(
         BillingManager.refreshOfferings()
     }
 
-    // Only the dashboard-configured offering can drive the hosted paywall; an
-    // offering without a paywall attached would render an error dialog.
-    val hostedOffering = (offeringsState as? OfferingsState.Ready)
-        ?.offering
-        ?.takeIf { it.hasPaywall }
+    UnlockPaywall(onNavigateBack = onNavigateBack)
+}
 
-    when {
-        !isAvailable -> FallbackPaywall(onNavigateBack = onNavigateBack)
+// ---------------------------------------------------------------------------
+// Palette
+//
+// The paywall runs a flatter, neutral-grey palette of its own rather than the
+// app's blue-tinted Pebble scheme: the design is white cards on near-white with
+// a near-black ink, and Pebble's blue casts a tint through every shadow and
+// border. Dark-theme values come from the app scheme so the screen still flips.
+// ---------------------------------------------------------------------------
 
-        offeringsState is OfferingsState.Idle || offeringsState is OfferingsState.Loading ->
-            PaywallLoading(onNavigateBack = onNavigateBack)
+private class PaywallColors(
+    /** Near-black: headings, ticks, selected borders, the CTA. */
+    val ink: Color,
+    /** Secondary grey: subtitle, review handle, the Restore link. */
+    val subtle: Color,
+    /** Hairline grey: unselected plan borders and the empty radio ring. */
+    val hairline: Color,
+    /** Card and bottom-panel fill. */
+    val panel: Color,
+    /** Fill behind the chosen plan. */
+    val selectedFill: Color,
+    /** Background wash behind the scrolling half, top to bottom. */
+    val backdrop: List<Color>,
+    /** Sits on top of [ink] — the tick inside a filled dot, the CTA label. */
+    val onInk: Color,
+    /** The CTA's own vertical gradient. */
+    val ctaGradient: List<Color>
+)
 
-        hostedOffering != null -> HostedPaywall(
-            offering = hostedOffering,
-            onDismiss = onNavigateBack
+@Composable
+private fun paywallColors(): PaywallColors {
+    val scheme = MaterialTheme.colorScheme
+    return if (isPebbleDark) {
+        PaywallColors(
+            ink = scheme.onBackground,
+            subtle = scheme.onSurfaceVariant,
+            hairline = scheme.outline,
+            panel = scheme.surface,
+            selectedFill = scheme.onSurface.copy(alpha = 0.10f),
+            backdrop = listOf(scheme.surface, scheme.background),
+            onInk = scheme.surface,
+            ctaGradient = listOf(scheme.onBackground, scheme.onBackground)
         )
-
-        else -> FallbackPaywall(onNavigateBack = onNavigateBack)
-    }
-}
-
-/** RevenueCat's templated paywall, configured entirely from the dashboard. */
-@Composable
-private fun HostedPaywall(
-    offering: Offering,
-    onDismiss: () -> Unit
-) {
-    // The SDK calls dismissRequest on close *and* after a successful purchase or
-    // restore, so this is also the "we're done here" hook.
-    val currentOnDismiss by rememberUpdatedState(onDismiss)
-
-    val options = remember(offering) {
-        PaywallOptions.Builder {
-            BillingManager.refreshInBackground()
-            currentOnDismiss()
-        }
-            .setOffering(offering)
-            .setShouldDisplayDismissButton(true)
-            .setListener(
-                object : PaywallListener {
-                    override fun onPurchaseCompleted(
-                        customerInfo: CustomerInfo,
-                        storeTransaction: StoreTransaction
-                    ) {
-                        BillingManager.onCustomerInfo(customerInfo)
-                    }
-
-                    override fun onRestoreCompleted(customerInfo: CustomerInfo) {
-                        BillingManager.onCustomerInfo(customerInfo)
-                    }
-                }
-            )
-            .build()
-    }
-
-    Paywall(options)
-}
-
-@Composable
-private fun PaywallLoading(onNavigateBack: () -> Unit) {
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(MaterialTheme.colorScheme.background)
-    ) {
-        // A spinner is never allowed to be a dead end, however briefly.
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 24.dp, vertical = 16.dp),
-            horizontalArrangement = Arrangement.Start
-        ) {
-            PebbleIconButton(
-                icon = Icons.Default.Close,
-                contentDescription = "Close",
-                onClick = onNavigateBack
-            )
-        }
-        CircularProgressIndicator(
-            color = MaterialTheme.colorScheme.primary,
-            modifier = Modifier.align(Alignment.Center)
+    } else {
+        PaywallColors(
+            ink = Color(0xFF1C1C1E),
+            subtle = Color(0xFF8A8A8E),
+            hairline = Color(0xFFD8D8DC),
+            panel = Color(0xFFFFFFFF),
+            selectedFill = Color(0xFFF2F2F4),
+            backdrop = listOf(Color(0xFFFAFAFB), Color(0xFFEDEDF0)),
+            onInk = Color(0xFFFFFFFF),
+            ctaGradient = listOf(Color(0xFF44444A), Color(0xFF2B2B30), Color(0xFF1F1F23))
         )
     }
 }
 
-/**
- * Hand-rolled Hook Pro paywall on the Pebble design system.
- *
- * The safety net for when RevenueCat has no paywall to give us. Packages,
- * prices and the purchase flow still come straight from the SDK — nothing about
- * the plan line-up is hardcoded, it renders whatever the current offering says.
- */
+/** The orange of the review stars. */
+private val StarGold = Color(0xFFFF9F0A)
+
 @Composable
-private fun FallbackPaywall(
+private fun UnlockPaywall(
     onNavigateBack: () -> Unit
 ) {
     val context = LocalContext.current
     val activity = remember(context) { context.findActivity() }
     val uriHandler = LocalUriHandler.current
+    val colors = paywallColors()
 
     val isPro by BillingManager.isPro.collectAsState()
     val offeringsState by BillingManager.offeringsState.collectAsState()
@@ -239,18 +220,25 @@ private fun FallbackPaywall(
         offeringsState is OfferingsState.Idle || offeringsState is OfferingsState.Loading
 
     // Whatever the dashboard's current offering contains, ordered shortest
-    // period first (weekly → monthly → yearly) rather than by a fixed list.
+    // period first (weekly → yearly) rather than by a fixed list.
     val packages = remember(offeringsState) {
-        (offeringsState as? OfferingsState.Ready)
+        val all = (offeringsState as? OfferingsState.Ready)
             ?.offering
             ?.availablePackages
             .orEmpty()
             .sortedBy { it.planRank() }
+
+        // Monthly is deliberately not offered on this screen: the two-card
+        // layout is a straight weekly-vs-yearly choice, and a third option in
+        // the middle is what makes people leave without picking anything. It
+        // still comes back if it is somehow the only thing the offering has,
+        // because an empty paywall is worse than an unplanned one.
+        all.filterNot { it.planKey() == PlanKey.MONTHLY }.ifEmpty { all }
     }
     val bestValue = remember(packages) {
         if (packages.size > 1) packages.maxByOrNull { it.planRank() } else null
     }
-    val yearlySavings = remember(packages) { yearlySavingsPercent(packages) }
+    val discounts = remember(packages) { discountPercents(packages) }
 
     LaunchedEffect(packages) {
         if (selectedPackage == null || packages.none { it.identifier == selectedPackage?.identifier }) {
@@ -273,367 +261,595 @@ private fun FallbackPaywall(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(MaterialTheme.colorScheme.background)
-            .verticalScroll(rememberScrollState())
-            .padding(horizontal = 24.dp, vertical = 16.dp)
+            .background(Brush.verticalGradient(colors.backdrop))
     ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.Start
+        // ---- Scrolling top half: pitch and social proof ----------------------
+        Column(
+            modifier = Modifier
+                .weight(1f)
+                .verticalScroll(rememberScrollState())
+                .statusBarsPadding()
         ) {
-            PebbleIconButton(
-                icon = Icons.Default.Close,
-                contentDescription = "Close",
-                onClick = onNavigateBack
-            )
-        }
-
-        Spacer(modifier = Modifier.height(20.dp))
-
-        Text(
-            text = BillingManager.PRO_DISPLAY_NAME,
-            style = MaterialTheme.typography.displaySmall,
-            fontWeight = FontWeight.Bold,
-            color = MaterialTheme.colorScheme.primary
-        )
-
-        Text(
-            text = "Unlimited rizz. Every tone. Every reply.",
-            style = MaterialTheme.typography.bodyLarge,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-
-        Spacer(modifier = Modifier.height(24.dp))
-
-        PRO_BENEFITS.forEach { benefit ->
-            BenefitRow(text = benefit)
-            Spacer(modifier = Modifier.height(10.dp))
-        }
-
-        Spacer(modifier = Modifier.height(20.dp))
-
-        ReviewsCarousel()
-
-        Spacer(modifier = Modifier.height(20.dp))
-
-        when {
-            isPro -> {
+            // No close button, by design: the reference screen leads with the
+            // Restore link alone and Android's back gesture already pops this
+            // route, so there is no dead end to rescue.
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 6.dp, end = 6.dp),
+                horizontalArrangement = Arrangement.End
+            ) {
                 Text(
-                    text = "You're on ${BillingManager.PRO_DISPLAY_NAME}. Thanks for the support.",
+                    text = if (isWorking) "Working…" else "Restore",
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(12.dp))
+                        .clickable {
+                            // The recovery route for anyone who already paid —
+                            // reachable whatever else on this screen went wrong.
+                            if (isWorking) return@clickable
+                            statusMessage = null
+                            BillingManager.startRestore()
+                        }
+                        .padding(horizontal = 10.dp, vertical = 8.dp),
                     style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.SemiBold,
-                    color = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.fillMaxWidth(),
-                    textAlign = TextAlign.Center
-                )
-                Spacer(modifier = Modifier.height(16.dp))
-                PebbleButton(
-                    text = "Done",
-                    onClick = onNavigateBack,
-                    tone = PebbleTone.SLATE
+                    fontSize = 17.sp,
+                    fontWeight = FontWeight.Normal,
+                    color = colors.subtle
                 )
             }
 
-            !isAvailable -> {
+            Spacer(modifier = Modifier.height(20.dp))
+
+            Text(
+                text = "Unlock ${BillingManager.PRO_DISPLAY_NAME}",
+                style = MaterialTheme.typography.displaySmall,
+                fontSize = 30.sp,
+                lineHeight = 36.sp,
+                fontWeight = FontWeight.Bold,
+                color = colors.ink,
+                textAlign = TextAlign.Center,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 24.dp)
+            )
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            Text(
+                text = "Proven to get more matches + dates",
+                style = MaterialTheme.typography.bodyLarge,
+                fontSize = 16.sp,
+                color = colors.subtle,
+                textAlign = TextAlign.Center,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 24.dp)
+            )
+
+            Spacer(modifier = Modifier.height(32.dp))
+
+            ReviewsCarousel(colors = colors)
+
+            Spacer(modifier = Modifier.height(44.dp))
+
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 24.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                PRO_BENEFITS.forEach { benefit ->
+                    BenefitRow(text = benefit, colors = colors)
+                }
+            }
+
+            Spacer(modifier = Modifier.height(28.dp))
+        }
+
+        // ---- Pinned bottom panel: plans, CTA, the legal small print ----------
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                // A flat top edge — the panel is separated from the wash above
+                // by a soft shadow, not by a corner radius.
+                .shadow(
+                    elevation = 10.dp,
+                    ambientColor = Color.Black.copy(alpha = 0.10f),
+                    spotColor = Color.Black.copy(alpha = 0.12f),
+                    clip = false
+                )
+                .background(color = colors.panel)
+                .navigationBarsPadding()
+                .padding(horizontal = 16.dp)
+                .padding(top = 24.dp, bottom = 12.dp)
+        ) {
+            when {
+                isPro -> {
+                    Text(
+                        text = "You're on ${BillingManager.PRO_DISPLAY_NAME}. " +
+                            "Thanks for the support.",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        color = colors.ink,
+                        modifier = Modifier.fillMaxWidth(),
+                        textAlign = TextAlign.Center
+                    )
+                    Spacer(modifier = Modifier.height(16.dp))
+                    ContinueButton(
+                        text = "Done",
+                        showChevron = false,
+                        colors = colors,
+                        onClick = onNavigateBack
+                    )
+                }
+
+                !isAvailable -> {
+                    Text(
+                        text = "Subscriptions aren't available in this build yet. " +
+                            "Check back after the next update.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = colors.subtle,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+
+                packages.isEmpty() -> {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(120.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        if (isLoadingOfferings) {
+                            CircularProgressIndicator(color = colors.ink)
+                        } else {
+                            Text(
+                                text = "Couldn't load the plans. " +
+                                    "Check your connection and try again.",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = colors.subtle,
+                                textAlign = TextAlign.Center
+                            )
+                        }
+                    }
+                }
+
+                else -> {
+                    PlanPicker(
+                        packages = packages,
+                        selected = selectedPackage,
+                        discounts = discounts,
+                        colors = colors,
+                        onSelect = { selectedPackage = it }
+                    )
+
+                    Spacer(modifier = Modifier.height(20.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.Center,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Check,
+                            contentDescription = null,
+                            tint = colors.ink,
+                            modifier = Modifier.size(21.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "No Commitment - Cancel Anytime",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontSize = 17.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = colors.ink
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    val chosen = selectedPackage
+                    ContinueButton(
+                        text = when {
+                            isWorking -> "Working…"
+                            chosen != null && chosen.hasFreeTrial() -> "Start free trial 🙌"
+                            else -> "Continue 🙌"
+                        },
+                        showChevron = !isWorking,
+                        colors = colors,
+                        onClick = {
+                            if (isWorking) return@ContinueButton
+                            if (activity == null || chosen == null) {
+                                statusMessage = "Couldn't start the purchase. Try again."
+                                return@ContinueButton
+                            }
+                            statusMessage = null
+                            // Deliberately not launched from a composition scope —
+                            // see BillingManager.startPurchase.
+                            BillingManager.startPurchase(activity, chosen)
+                        }
+                    )
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    Text(
+                        text = headlinePrice(chosen),
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontSize = 13.sp,
+                        color = colors.subtle,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            }
+
+            val message = statusMessage
+            if (message != null) {
+                Spacer(modifier = Modifier.height(10.dp))
                 Text(
-                    text = "Subscriptions aren't available in this build yet. " +
-                        "Check back after the next update.",
+                    text = message,
                     style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = colors.subtle,
                     textAlign = TextAlign.Center,
                     modifier = Modifier.fillMaxWidth()
                 )
             }
 
-            packages.isEmpty() -> {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(96.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    if (isLoadingOfferings) {
-                        CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
-                    } else {
-                        Text(
-                            text = "Couldn't load the plans. Check your connection and try again.",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            textAlign = TextAlign.Center
-                        )
-                    }
-                }
-            }
+            Spacer(modifier = Modifier.height(8.dp))
 
-            else -> {
-                packages.forEach { availablePackage ->
-                    PackageRow(
-                        availablePackage = availablePackage,
-                        selected = availablePackage.identifier == selectedPackage?.identifier,
-                        isBestValue = availablePackage.identifier == bestValue?.identifier,
-                        savingsPercent = if (availablePackage.planKey() == PlanKey.ANNUAL) {
-                            yearlySavings
-                        } else {
-                            null
-                        },
-                        onClick = { selectedPackage = availablePackage }
-                    )
-                    Spacer(modifier = Modifier.height(10.dp))
-                }
-
-                Spacer(modifier = Modifier.height(10.dp))
-
-                val chosen = selectedPackage
-                PebbleButton(
-                    text = when {
-                        isWorking -> "Working…"
-                        chosen != null && chosen.hasFreeTrial() -> "Start free trial"
-                        else -> "Continue"
-                    },
-                    onClick = {
-                        if (isWorking) return@PebbleButton
-                        if (activity == null || chosen == null) {
-                            statusMessage = "Couldn't start the purchase. Try again."
-                            return@PebbleButton
-                        }
-                        statusMessage = null
-                        // Deliberately not launched from a composition scope —
-                        // see BillingManager.startPurchase.
-                        BillingManager.startPurchase(activity, chosen)
-                    }
-                )
-            }
-        }
-
-        val message = statusMessage
-        if (message != null) {
-            Spacer(modifier = Modifier.height(12.dp))
+            // Google Play requires the renewal terms to be visible on the screen
+            // where the subscription is offered. Sized to sit under the fold of
+            // the reference layout without competing with it.
             Text(
-                text = message,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                text = billingDisclosure(selectedPackage),
+                style = MaterialTheme.typography.bodySmall,
+                fontSize = 10.sp,
+                lineHeight = 13.sp,
+                color = colors.subtle.copy(alpha = 0.7f),
                 textAlign = TextAlign.Center,
                 modifier = Modifier.fillMaxWidth()
             )
+
+            Spacer(modifier = Modifier.height(4.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.Center
+            ) {
+                FooterLink("Terms", colors) { uriHandler.openUri(TERMS_URL) }
+                Spacer(modifier = Modifier.width(20.dp))
+                FooterLink("Privacy", colors) { uriHandler.openUri(PRIVACY_URL) }
+            }
         }
-
-        Spacer(modifier = Modifier.height(16.dp))
-
-        // Google Play requires the renewal terms to be visible on the screen
-        // where the subscription is offered.
-        Text(
-            text = billingDisclosure(selectedPackage),
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            textAlign = TextAlign.Center,
-            modifier = Modifier.fillMaxWidth()
-        )
-
-        Spacer(modifier = Modifier.height(8.dp))
-
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.Center
-        ) {
-            // The recovery route for anyone who already paid — reachable
-            // whatever else on this screen went wrong, including while a
-            // purchase is still resolving.
-            PebbleTextButton(
-                text = if (isWorking) "Working…" else "Restore purchases",
-                onClick = {
-                    if (isWorking) return@PebbleTextButton
-                    statusMessage = null
-                    BillingManager.startRestore()
-                }
-            )
-        }
-
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.Center
-        ) {
-            PebbleTextButton(
-                text = "Terms",
-                onClick = { uriHandler.openUri(TERMS_URL) },
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            PebbleTextButton(
-                text = "Privacy",
-                onClick = { uriHandler.openUri(PRIVACY_URL) },
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-        }
-
-        Spacer(modifier = Modifier.height(24.dp))
     }
 }
 
 @Composable
-private fun BenefitRow(text: String) {
+private fun FooterLink(text: String, colors: PaywallColors, onClick: () -> Unit) {
+    Text(
+        text = text,
+        modifier = Modifier
+            .clip(RoundedCornerShape(8.dp))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 8.dp, vertical = 6.dp),
+        style = MaterialTheme.typography.bodySmall,
+        fontSize = 11.sp,
+        color = colors.subtle.copy(alpha = 0.8f)
+    )
+}
+
+/**
+ * The near-black call to action: full-bleed pill, centred label, chevron pinned
+ * to the right edge, and the app's press-spring so it still feels like Hook.
+ */
+@Composable
+private fun ContinueButton(
+    text: String,
+    showChevron: Boolean,
+    colors: PaywallColors,
+    onClick: () -> Unit
+) {
+    val interactionSource = remember { MutableInteractionSource() }
+    val isPressed by interactionSource.collectIsPressedAsState()
+    val scale by animateFloatAsState(
+        targetValue = if (isPressed) 0.97f else 1f,
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioMediumBouncy,
+            stiffness = Spring.StiffnessLow
+        ),
+        label = "cta_scale"
+    )
+    val shape = RoundedCornerShape(16.dp)
+
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .graphicsLayer {
+                scaleX = scale
+                scaleY = scale
+            }
+            .shadow(
+                elevation = if (isPressed) 12.dp else 8.dp,
+                shape = shape,
+                ambientColor = Color.Black.copy(alpha = 0.22f),
+                spotColor = Color.Black.copy(alpha = 0.30f),
+                clip = false
+            )
+            .background(brush = Brush.verticalGradient(colors.ctaGradient), shape = shape)
+            .border(width = 1.dp, color = Color.White.copy(alpha = 0.16f), shape = shape)
+            .clip(shape)
+            .clickable(interactionSource = interactionSource, indication = null, onClick = onClick)
+            .height(60.dp)
+            .padding(horizontal = 18.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            text = text,
+            style = MaterialTheme.typography.titleMedium,
+            fontSize = 19.sp,
+            fontWeight = FontWeight.Bold,
+            color = colors.onInk,
+            textAlign = TextAlign.Center
+        )
+        if (showChevron) {
+            Icon(
+                imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                contentDescription = null,
+                tint = colors.onInk,
+                modifier = Modifier
+                    .align(Alignment.CenterEnd)
+                    .size(28.dp)
+            )
+        }
+    }
+}
+
+/**
+ * The plans, side by side when there are two or three of them — the shape the
+ * design is built around — and stacked once there are more than a row can hold
+ * legibly.
+ */
+@Composable
+private fun PlanPicker(
+    packages: List<Package>,
+    selected: Package?,
+    discounts: Map<String, Int>,
+    colors: PaywallColors,
+    onSelect: (Package) -> Unit
+) {
+    if (packages.size in 2..3) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(IntrinsicSize.Min),
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            packages.forEach { availablePackage ->
+                PlanCard(
+                    availablePackage = availablePackage,
+                    selected = availablePackage.identifier == selected?.identifier,
+                    discountPercent = discounts[availablePackage.identifier],
+                    colors = colors,
+                    onClick = { onSelect(availablePackage) },
+                    modifier = Modifier.weight(1f)
+                )
+            }
+        }
+    } else {
+        Column(
+            modifier = Modifier.fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            packages.forEach { availablePackage ->
+                PlanCard(
+                    availablePackage = availablePackage,
+                    selected = availablePackage.identifier == selected?.identifier,
+                    discountPercent = discounts[availablePackage.identifier],
+                    colors = colors,
+                    onClick = { onSelect(availablePackage) },
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+        }
+    }
+}
+
+/**
+ * One selectable plan: period, the price normalised to a weekly rate, a radio
+ * dot, and — when it's cheaper per week than the priciest plan — a discount pill
+ * straddling the top edge. Flat by design: borders, no shadow.
+ */
+@Composable
+private fun PlanCard(
+    availablePackage: Package,
+    selected: Boolean,
+    discountPercent: Int?,
+    colors: PaywallColors,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val selectedness by animateFloatAsState(
+        targetValue = if (selected) 1f else 0f,
+        animationSpec = tween(180),
+        label = "plan_selectedness"
+    )
+    val border = lerp(colors.hairline, colors.ink, selectedness)
+    val fill = lerp(colors.panel, colors.selectedFill, selectedness)
+    val shape = RoundedCornerShape(14.dp)
+
+    Box(modifier = modifier) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .fillMaxHeight()
+                // Room for the discount pill to straddle the top edge.
+                .padding(top = 10.dp)
+                .defaultMinSize(minHeight = 66.dp)
+                .clip(shape)
+                .background(color = fill)
+                .border(width = if (selected) 2.dp else 1.dp, color = border, shape = shape)
+                .clickable(onClick = onClick)
+                .padding(horizontal = 14.dp, vertical = 11.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = availablePackage.planTitle(),
+                    style = MaterialTheme.typography.titleMedium,
+                    fontSize = 17.sp,
+                    lineHeight = 22.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = colors.ink,
+                    maxLines = 1
+                )
+                Spacer(modifier = Modifier.height(2.dp))
+                Text(
+                    text = availablePackage.weeklyRateLabel(),
+                    style = MaterialTheme.typography.bodyLarge,
+                    fontSize = 15.sp,
+                    lineHeight = 20.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = colors.ink,
+                    maxLines = 1
+                )
+                if (availablePackage.hasFreeTrial()) {
+                    Text(
+                        text = "Free trial",
+                        style = MaterialTheme.typography.labelSmall,
+                        lineHeight = 14.sp,
+                        color = colors.subtle,
+                        maxLines = 1
+                    )
+                }
+            }
+            Spacer(modifier = Modifier.width(6.dp))
+            SelectionDot(selected = selected, colors = colors)
+        }
+
+        if (discountPercent != null) {
+            DiscountPill(
+                percent = discountPercent,
+                colors = colors,
+                modifier = Modifier.align(Alignment.TopCenter)
+            )
+        }
+    }
+}
+
+/** Filled tick when chosen, hollow ring when not. */
+@Composable
+private fun SelectionDot(selected: Boolean, colors: PaywallColors) {
+    Box(
+        modifier = Modifier
+            .size(24.dp)
+            .then(
+                if (selected) {
+                    Modifier.background(color = colors.ink, shape = CircleShape)
+                } else {
+                    Modifier.border(width = 2.dp, color = colors.hairline, shape = CircleShape)
+                }
+            ),
+        contentAlignment = Alignment.Center
+    ) {
+        if (selected) {
+            Icon(
+                imageVector = Icons.Default.Check,
+                contentDescription = null,
+                tint = colors.onInk,
+                modifier = Modifier.size(14.dp)
+            )
+        }
+    }
+}
+
+/** The dark "81% OFF" pill that sits on the top edge of a discounted plan. */
+@Composable
+private fun DiscountPill(percent: Int, colors: PaywallColors, modifier: Modifier = Modifier) {
+    Box(
+        modifier = modifier
+            .background(color = colors.ink, shape = RoundedCornerShape(8.dp))
+            .padding(horizontal = 9.dp, vertical = 3.dp)
+    ) {
+        Text(
+            text = "$percent% OFF",
+            style = MaterialTheme.typography.labelSmall,
+            fontSize = 11.sp,
+            lineHeight = 14.sp,
+            fontWeight = FontWeight.Bold,
+            color = colors.onInk
+        )
+    }
+}
+
+@Composable
+private fun BenefitRow(text: String, colors: PaywallColors) {
     Row(
-        modifier = Modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(12.dp)
+        horizontalArrangement = Arrangement.spacedBy(11.dp)
     ) {
         Box(
             modifier = Modifier
-                .size(24.dp)
-                .background(
-                    color = MaterialTheme.colorScheme.primary,
-                    shape = RoundedCornerShape(8.dp)
-                ),
+                .size(22.dp)
+                .background(color = colors.ink, shape = CircleShape),
             contentAlignment = Alignment.Center
         ) {
             Icon(
                 imageVector = Icons.Default.Check,
                 contentDescription = null,
-                tint = Color.White,
-                modifier = Modifier.size(15.dp)
+                tint = colors.onInk,
+                modifier = Modifier.size(13.dp)
             )
         }
         Text(
             text = text,
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onBackground
+            style = MaterialTheme.typography.bodyLarge,
+            fontSize = 17.sp,
+            lineHeight = 24.sp,
+            color = colors.ink
         )
     }
-}
-
-/** One selectable plan: period on the left, localised store price on the right. */
-@Composable
-private fun PackageRow(
-    availablePackage: Package,
-    selected: Boolean,
-    isBestValue: Boolean,
-    savingsPercent: Int?,
-    onClick: () -> Unit
-) {
-    val contentColor = if (selected) Color.White else MaterialTheme.colorScheme.onSurface
-    val trial = availablePackage.hasFreeTrial()
-
-    PebbleSurface(
-        onClick = onClick,
-        modifier = Modifier.fillMaxWidth(),
-        tone = if (selected) PebbleTone.BLUE else PebbleTone.MUTED,
-        cornerRadius = 18.dp,
-        elevation = if (selected) 5.dp else 2.dp,
-        contentAlignment = Alignment.CenterStart
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 18.dp, vertical = 16.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            Column(modifier = Modifier.weight(1f)) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Text(
-                        text = availablePackage.planTitle(),
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.SemiBold,
-                        color = contentColor
-                    )
-                    if (savingsPercent != null) {
-                        SavingsBadge(percent = savingsPercent, selected = selected)
-                    }
-                }
-                val caption = when {
-                    trial && isBestValue -> "Best value · free trial included"
-                    isBestValue -> "Best value"
-                    trial -> "Free trial included"
-                    else -> null
-                }
-                if (caption != null) {
-                    Text(
-                        text = caption,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = contentColor.copy(alpha = 0.75f)
-                    )
-                }
-            }
-            Text(
-                text = availablePackage.product.price.formatted,
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold,
-                color = contentColor
-            )
-        }
-    }
-}
-
-/** Small "SAVE x%" pill, sized to sit next to the yearly plan's title. */
-@Composable
-private fun SavingsBadge(percent: Int, selected: Boolean) {
-    // Flip the pill's colours on the selected (blue) row so it stays legible.
-    val background = if (selected) Color.White else MaterialTheme.colorScheme.primary
-    val foreground = if (selected) MaterialTheme.colorScheme.primary else Color.White
-
-    Box(
-        modifier = Modifier
-            .background(color = background, shape = RoundedCornerShape(8.dp))
-            .padding(horizontal = 8.dp, vertical = 3.dp)
-    ) {
-        Text(
-            text = "SAVE $percent%",
-            style = MaterialTheme.typography.labelSmall,
-            fontWeight = FontWeight.Bold,
-            color = foreground
-        )
-    }
-}
-
-/**
- * How much cheaper a year on the yearly plan is than a year on the reference
- * plan. Prices are compared as annualised amounts in micros so currency and
- * cadence differences cancel out:
- *  - yearly     → its own [amountMicros]
- *  - monthly    → [amountMicros] × 12   (preferred reference)
- *  - weekly     → [amountMicros] × 52   (fallback reference)
- *
- * Returns null when there's no yearly plan, no reference plan, or the yearly
- * plan isn't actually a saving — the badge is only shown for a positive result.
- */
-private fun yearlySavingsPercent(packages: List<Package>): Int? {
-    val yearly = packages.firstOrNull { it.planKey() == PlanKey.ANNUAL } ?: return null
-    val monthly = packages.firstOrNull { it.planKey() == PlanKey.MONTHLY }
-    val weekly = packages.firstOrNull { it.planKey() == PlanKey.WEEKLY }
-
-    val yearlyAnnualized = yearly.product.price.amountMicros
-    val referenceAnnualized = when {
-        monthly != null -> monthly.product.price.amountMicros * 12
-        weekly != null -> weekly.product.price.amountMicros * 52
-        else -> return null
-    }
-    if (referenceAnnualized <= 0L) return null
-
-    val percent = ((referenceAnnualized - yearlyAnnualized).toDouble() /
-        referenceAnnualized * 100).roundToInt()
-    return if (percent > 0) percent else null
 }
 
 /** A single testimonial shown in the [ReviewsCarousel]. */
-private data class Review(val name: String, val text: String, val rating: Int = 5)
+private data class Review(
+    val headline: String,
+    val body: String,
+    val handle: String,
+    val rating: Int = 5
+)
 
 // Placeholder testimonial copy — safe for the owner to edit or replace with
 // real reviews. These are illustrative only, not attributed to real users.
 private val REVIEWS = listOf(
-    Review("Jordan M.", "Matched on Friday, had a date by Sunday. Hook always knows what to say."),
-    Review("Priya K.", "I used to overthink every reply for ten minutes. Now it takes ten seconds."),
-    Review("Alex R.", "The tones are unreal — funny when I want funny, smooth when I want smooth."),
-    Review("Sam T.", "Went from dry 'hey' replies to actual conversations. Genuinely a cheat code."),
-    Review("Casey L.", "Worth every penny. My matches think I got way funnier overnight.")
+    Review(
+        headline = "actually works lol",
+        body = "before i averaged 1 match/week, now i get like 7 matches/week. i use " +
+            "it to spam likes right before going to sleep lmao",
+        handle = "rizzgod1"
+    ),
+    Review(
+        headline = "no more dry texts",
+        body = "i used to overthink every reply for ten minutes. now it takes ten " +
+            "seconds and the convo actually goes somewhere.",
+        handle = "mattmakesmoves"
+    ),
+    Review(
+        headline = "matched → date in 3 days",
+        body = "the tones are unreal. funny when i want funny, smooth when i want " +
+            "smooth. my matches think i got way funnier overnight.",
+        handle = "casey.l"
+    )
 )
 
 /**
- * Auto-advancing testimonials carousel. Purely decorative social proof — it
- * wraps back to the first card and never blocks the purchase flow.
+ * Auto-advancing testimonials carousel with the neighbouring cards peeking in
+ * at the edges. Purely decorative social proof — it wraps back to the first card
+ * and never blocks the purchase flow.
  */
 @Composable
-private fun ReviewsCarousel() {
+private fun ReviewsCarousel(colors: PaywallColors) {
     val pagerState = rememberPagerState(pageCount = { REVIEWS.size })
 
     // Drift to the next card every few seconds, looping at the end.
@@ -648,12 +864,14 @@ private fun ReviewsCarousel() {
     Column(modifier = Modifier.fillMaxWidth()) {
         HorizontalPager(
             state = pagerState,
-            modifier = Modifier.fillMaxWidth()
+            modifier = Modifier.fillMaxWidth(),
+            contentPadding = PaddingValues(horizontal = 40.dp),
+            pageSpacing = 20.dp
         ) { page ->
-            ReviewCard(review = REVIEWS[page])
+            ReviewCard(review = REVIEWS[page], colors = colors)
         }
 
-        Spacer(modifier = Modifier.height(12.dp))
+        Spacer(modifier = Modifier.height(16.dp))
 
         // Page indicator dots, mirroring the onboarding/demo pattern.
         Row(
@@ -662,25 +880,16 @@ private fun ReviewsCarousel() {
         ) {
             repeat(REVIEWS.size) { index ->
                 val active = pagerState.currentPage == index
-                val width by animateDpAsState(
-                    targetValue = if (active) 20.dp else 8.dp,
-                    animationSpec = tween(300),
-                    label = "review_indicator_width"
-                )
                 val alpha by animateFloatAsState(
-                    targetValue = if (active) 1f else 0.3f,
+                    targetValue = if (active) 0.45f else 0.18f,
                     animationSpec = tween(300),
                     label = "review_indicator_alpha"
                 )
                 Box(
                     modifier = Modifier
-                        .padding(horizontal = 3.dp)
-                        .width(width)
-                        .height(8.dp)
-                        .background(
-                            color = MaterialTheme.colorScheme.primary.copy(alpha = alpha),
-                            shape = RoundedCornerShape(4.dp)
-                        )
+                        .padding(horizontal = 4.dp)
+                        .size(7.dp)
+                        .background(color = colors.ink.copy(alpha = alpha), shape = CircleShape)
                 )
             }
         }
@@ -688,39 +897,60 @@ private fun ReviewsCarousel() {
 }
 
 @Composable
-private fun ReviewCard(review: Review) {
-    PebbleSurface(
-        onClick = null,
-        modifier = Modifier.fillMaxWidth(),
-        tone = PebbleTone.MUTED,
-        cornerRadius = 18.dp
+private fun ReviewCard(review: Review, colors: PaywallColors) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .shadow(
+                elevation = 14.dp,
+                shape = RoundedCornerShape(16.dp),
+                ambientColor = Color.Black.copy(alpha = 0.10f),
+                spotColor = Color.Black.copy(alpha = 0.14f),
+                clip = false
+            )
+            .background(color = colors.panel, shape = RoundedCornerShape(16.dp))
+            .padding(horizontal = 16.dp, vertical = 18.dp)
     ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 18.dp, vertical = 18.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            Text(
-                text = "★".repeat(review.rating),
-                style = MaterialTheme.typography.titleMedium,
-                color = MaterialTheme.colorScheme.primary
-            )
-            Spacer(modifier = Modifier.height(10.dp))
-            Text(
-                text = review.text,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurface,
-                textAlign = TextAlign.Center
-            )
-            Spacer(modifier = Modifier.height(10.dp))
-            Text(
-                text = review.name,
-                style = MaterialTheme.typography.labelMedium,
-                fontWeight = FontWeight.SemiBold,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
+        Text(
+            text = review.headline,
+            style = MaterialTheme.typography.titleLarge,
+            fontSize = 20.sp,
+            lineHeight = 26.sp,
+            fontWeight = FontWeight.Bold,
+            color = colors.ink
+        )
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        Row(horizontalArrangement = Arrangement.spacedBy(1.dp)) {
+            repeat(review.rating) {
+                Icon(
+                    imageVector = Icons.Default.Star,
+                    contentDescription = null,
+                    tint = StarGold,
+                    modifier = Modifier.size(19.dp)
+                )
+            }
         }
+
+        Spacer(modifier = Modifier.height(12.dp))
+
+        Text(
+            text = review.body,
+            style = MaterialTheme.typography.bodyLarge,
+            fontSize = 15.sp,
+            lineHeight = 22.sp,
+            color = colors.ink
+        )
+
+        Spacer(modifier = Modifier.height(14.dp))
+
+        Text(
+            text = review.handle,
+            style = MaterialTheme.typography.bodyMedium,
+            fontSize = 14.sp,
+            color = colors.subtle
+        )
     }
 }
 
@@ -758,16 +988,110 @@ private fun Package.planRank(): Int = planKey().rank
 
 private fun Package.planTitle(): String = planKey().title
 
-/** Shortest period first, so the list reads weekly → monthly → yearly. */
-private enum class PlanKey(val rank: Int, val title: String, val periodLabel: String?) {
-    WEEKLY(0, "Weekly", "week"),
-    MONTHLY(1, "Monthly", "month"),
-    TWO_MONTH(2, "Every 2 months", "2 months"),
-    THREE_MONTH(3, "Every 3 months", "3 months"),
-    SIX_MONTH(4, "Every 6 months", "6 months"),
-    ANNUAL(5, "Yearly", "year"),
-    LIFETIME(6, "Lifetime", null),
-    OTHER(7, BillingManager.PRO_DISPLAY_NAME, "billing period")
+/**
+ * Shortest period first, so the list reads weekly → yearly.
+ *
+ * [weeks] is how many weeks the plan bills for, used to put every plan on the
+ * same per-week footing. Null where a weekly rate is meaningless (lifetime) or
+ * unknown (a package shape we don't recognise).
+ */
+private enum class PlanKey(
+    val rank: Int,
+    val title: String,
+    val periodLabel: String?,
+    val weeks: Double?
+) {
+    WEEKLY(0, "Weekly", "week", 1.0),
+    MONTHLY(1, "Monthly", "month", WEEKS_PER_MONTH),
+    TWO_MONTH(2, "2 Months", "2 months", 2 * WEEKS_PER_MONTH),
+    THREE_MONTH(3, "3 Months", "3 months", 3 * WEEKS_PER_MONTH),
+    SIX_MONTH(4, "6 Months", "6 months", 6 * WEEKS_PER_MONTH),
+    ANNUAL(5, "Yearly", "year", 12 * WEEKS_PER_MONTH),
+    LIFETIME(6, "Lifetime", null, null),
+    OTHER(7, BillingManager.PRO_DISPLAY_NAME, "billing period", null)
+}
+
+/** 365.25 / 12 / 7 — the average month, so a year lands on 52.18 weeks. */
+private const val WEEKS_PER_MONTH = 4.348214285714286
+
+/** The plan's price divided down to what it costs per week, in micros. */
+private fun Package.weeklyMicros(): Double? {
+    val weeks = planKey().weeks ?: return null
+    if (weeks <= 0.0) return null
+    return product.price.amountMicros / weeks
+}
+
+/**
+ * "₹189.86/wk" — every plan expressed in the same unit so they can be compared
+ * at a glance, which is the whole point of the two-card layout. Falls back to
+ * the store's own formatted price for anything without a weekly rate (lifetime,
+ * unrecognised packages) or when the currency can't be formatted locally.
+ */
+private fun Package.weeklyRateLabel(): String {
+    val price = product.price
+    // The weekly plan's own formatted price is already the weekly rate, and the
+    // store's string beats anything we'd reconstruct (it drops empty decimals).
+    if (planKey() == PlanKey.WEEKLY) return "${price.formatted}/wk"
+
+    val weekly = weeklyMicros() ?: return price.formatted
+    val formatted = formatMoney(weekly, price.currencyCode) ?: return price.formatted
+    return "$formatted/wk"
+}
+
+/**
+ * How much cheaper each plan is per week than the most expensive one, keyed by
+ * package identifier.
+ *
+ * Comparing normalised weekly rates rather than a fixed yearly-vs-monthly pair
+ * means the badge is right whatever the dashboard's offering contains. Anything
+ * under 5% off isn't worth a badge.
+ */
+private fun discountPercents(packages: List<Package>): Map<String, Int> {
+    val weeklyRates = packages.mapNotNull { pkg -> pkg.weeklyMicros()?.let { pkg.identifier to it } }
+    val baseline = weeklyRates.maxOfOrNull { it.second } ?: return emptyMap()
+    if (baseline <= 0.0) return emptyMap()
+
+    return weeklyRates.mapNotNull { (identifier, rate) ->
+        val percent = ((baseline - rate) / baseline * 100).roundToInt()
+        if (percent >= 5) identifier to percent else null
+    }.toMap()
+}
+
+/**
+ * Format an amount in micros as money in [currencyCode], dropping the decimals
+ * when they'd all be zeroes (₹9,900 rather than ₹9,900.00). Returns null when
+ * the currency isn't one the platform knows, so callers can fall back to the
+ * store's own string.
+ */
+private fun formatMoney(amountMicros: Double, currencyCode: String): String? {
+    val amount = amountMicros / 1_000_000.0
+    val currency = runCatching { Currency.getInstance(currencyCode) }.getOrNull() ?: return null
+    val format = NumberFormat.getCurrencyInstance(Locale.getDefault())
+    format.currency = currency
+
+    val isWhole = abs(amount - amount.roundToLong()) < 0.005
+    format.minimumFractionDigits = if (isWhole) 0 else 2
+    format.maximumFractionDigits = if (isWhole) 0 else 2
+    return runCatching { format.format(amount) }.getOrNull()
+}
+
+/**
+ * The one-line price summary under the CTA: what actually gets charged, and the
+ * weekly rate again in brackets when it isn't the same number.
+ */
+private fun headlinePrice(selected: Package?): String {
+    if (selected == null) return " "
+    val price = selected.product.price.formatted
+    val key = selected.planKey()
+    if (key == PlanKey.LIFETIME) return "One-time payment of $price"
+
+    val period = key.periodLabel ?: "billing period"
+    val weekly = selected.weeklyRateLabel()
+    return if (key == PlanKey.WEEKLY) {
+        "Just $price/$period"
+    } else {
+        "Just $price/$period ($weekly)"
+    }
 }
 
 /**
