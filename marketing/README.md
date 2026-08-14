@@ -62,6 +62,9 @@ matters has to be on screen.
 
 ## Before posting
 
+Captions, hashtags, first comments, alt text, and bio copy live in
+[`POSTING.md`](./POSTING.md). Paste from there. Don't rewrite in the composer.
+
 - **Audio.** These render silent. Add a trending sound in the Instagram
   composer — a reel posted with no audio track gets throttled.
 - **Suggestion copy.** The replies in `src/videos/*.tsx` are written, not
