@@ -1,3 +1,10 @@
 .cursor
 server/skills-lock.json
 server/.agents/
+# graphify: everything under graphify-out/ is derived from the source tree and
+# is rebuilt by `graphify .` in seconds, so only the human-readable report is
+# tracked. graph.json and graph.html are ~2MB of generated data that would go
+# stale on every code change; cache/ is content-addressed scratch; the dotfiles
+# pin an absolute interpreter path from whichever machine last built the graph.
+graphify-out/*
+!graphify-out/GRAPH_REPORT.md
