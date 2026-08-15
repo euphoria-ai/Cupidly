@@ -200,7 +200,12 @@ fun PebbleSurface(
     )
 }
 
-/** Full-width primary pebble button. */
+/**
+ * Full-width primary pebble button.
+ *
+ * @param subtitle an optional second line under [text], for a button that has
+ *   to say what it leads to as well as what it is.
+ */
 @Composable
 fun PebbleButton(
     text: String,
@@ -208,7 +213,8 @@ fun PebbleButton(
     modifier: Modifier = Modifier,
     tone: PebbleTone = PebbleTone.BLUE,
     fillWidth: Boolean = true,
-    enabled: Boolean = true
+    enabled: Boolean = true,
+    subtitle: String? = null
 ) {
     val contentColor = if (tone == PebbleTone.MUTED) {
         MaterialTheme.colorScheme.onSurface
@@ -223,14 +229,29 @@ fun PebbleButton(
         modifier = if (enabled) sized else sized.alpha(0.5f),
         tone = tone
     ) {
-        Text(
-            text = text,
-            modifier = Modifier.padding(horizontal = 28.dp, vertical = 16.dp),
-            style = MaterialTheme.typography.titleMedium,
-            color = contentColor,
-            fontWeight = FontWeight.SemiBold,
-            textAlign = TextAlign.Center
-        )
+        Column(
+            modifier = Modifier.padding(
+                horizontal = 28.dp,
+                vertical = if (subtitle == null) 16.dp else 14.dp
+            ),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Text(
+                text = text,
+                style = MaterialTheme.typography.titleMedium,
+                color = contentColor,
+                fontWeight = FontWeight.SemiBold,
+                textAlign = TextAlign.Center
+            )
+            if (subtitle != null) {
+                Text(
+                    text = subtitle,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = contentColor.copy(alpha = 0.8f),
+                    textAlign = TextAlign.Center
+                )
+            }
+        }
     }
 }
 

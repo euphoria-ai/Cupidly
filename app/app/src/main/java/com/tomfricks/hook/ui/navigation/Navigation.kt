@@ -16,7 +16,6 @@ import androidx.navigation.compose.rememberNavController
 import com.tomfricks.hook.HookApplication
 import com.tomfricks.hook.billing.BillingManager
 import com.tomfricks.hook.ui.screens.demo.DemoScreen
-import com.tomfricks.hook.ui.screens.guide.GuideScreen
 import com.tomfricks.hook.ui.screens.home.HomeScreen
 import com.tomfricks.hook.ui.screens.onboarding.OnboardingFlow
 import com.tomfricks.hook.ui.screens.paywall.PaywallScreen
@@ -30,7 +29,6 @@ sealed class Screen(val route: String) {
     /** Everything from the profile questions to the keyboard being ready. */
     object Onboarding : Screen("onboarding")
     object Home : Screen("home")
-    object Guide : Screen("guide")
     object Demo : Screen("demo")
     object Paywall : Screen("paywall")
     object CustomerCenter : Screen("customer_center")
@@ -121,9 +119,6 @@ fun HookNavigation(paywallRequest: Int = 0) {
 
         composable(Screen.Home.route) {
             HomeScreen(
-                onNavigateToGuide = {
-                    navController.navigate(Screen.Guide.route)
-                },
                 onNavigateToDemo = {
                     navController.navigate(Screen.Demo.route)
                 },
@@ -136,13 +131,6 @@ fun HookNavigation(paywallRequest: Int = 0) {
                 preferencesRepository = preferencesRepository,
                 userPreferences = preferences,
                 isPro = isPro
-            )
-        }
-
-        composable(Screen.Guide.route) {
-            GuideScreen(
-                onNavigateBack = { navController.popBackStack() },
-                onNavigateToDemo = { navController.navigate(Screen.Demo.route) }
             )
         }
 

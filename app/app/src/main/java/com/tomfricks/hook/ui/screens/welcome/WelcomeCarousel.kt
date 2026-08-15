@@ -36,7 +36,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.tomfricks.hook.R
+import com.tomfricks.hook.ui.theme.HookMarkFlat
 import com.tomfricks.hook.ui.theme.PebbleButton
 import com.tomfricks.hook.ui.theme.PebbleTone
 import kotlinx.coroutines.launch
@@ -191,12 +191,7 @@ private fun SlideMedia(
             )
         } else {
             // Placeholder until the demo GIFs land.
-            Image(
-                painter = painterResource(id = R.mipmap.ic_launcher_foreground),
-                contentDescription = null,
-                contentScale = ContentScale.Fit,
-                modifier = Modifier.size(72.dp)
-            )
+            HookMarkFlat(size = 72.dp, contentDescription = null)
         }
     }
 }
