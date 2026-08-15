@@ -1,8 +1,8 @@
 export const site = {
   name: "Hook",
   tagline: "#1 AI Rizz Keyboard",
-  url: "https://cupidly.app",
-  supportEmail: "support@cupidly.app",
+  url: "https://hook.app",
+  supportEmail: "support@hook.app",
   playStoreUrl:
     "https://play.google.com/store/apps/details?id=app.hook",
   xUrl: "https://x.com/try_hook",
