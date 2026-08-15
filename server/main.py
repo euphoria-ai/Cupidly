@@ -225,7 +225,7 @@ REASONING_EFFORT = os.getenv("GROQ_REASONING_EFFORT", "none")
 
 # Compact prompt — fewer input tokens = faster processing.
 # "JSON" must appear literally for Groq's json_object fallback mode.
-PROMPT_TEMPLATE = """Look at this chat screenshot. Generate 3 flirty reply suggestions.
+PROMPT_TEMPLATE = """You are an expert flirting agent. Your task is to analyse the attached screenshot and generate 3 flirty chat reply suggestions keeping the parameters described below.
 {context_block}
 Preferences: style={style}, tone={tone}, flirt={flirt_level}, length={reply_length}, emoji={emoji_use}{profile_info}
 
