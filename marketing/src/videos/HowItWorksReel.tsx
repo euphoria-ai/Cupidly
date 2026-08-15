@@ -14,6 +14,7 @@ import { HookKeyboard } from "../components/HookKeyboard";
 import { ChatThumb } from "../components/ChatThumb";
 import { ChatMessage, IgChat } from "../components/IgChat";
 import { Phone } from "../components/Phone";
+import { MusicBed, Sfx, SfxRepeat } from "../components/Sfx";
 import { PHONE_WIDTH, PhoneSlot, Stage } from "../components/Stage";
 import { DISPLAY } from "../fonts";
 import { KEYBOARD_HEIGHT, ig, pebble } from "../theme";
@@ -182,6 +183,24 @@ export const HowItWorksReel: React.FC = () => {
       <Sequence from={B.endCard}>
         <EndCard cta="Get Hook free on Google Play" />
       </Sequence>
+
+      {/* ---------------- sound ---------------- */}
+
+      <MusicBed over={HOW_IT_WORKS_REEL_DURATION} />
+
+      {/* One pop per step chip lighting up — the spine of the explainer. */}
+      {STEPS.map((s) => (
+        <Sfx key={s.n} name="pop" at={s.from} volume={0.9} />
+      ))}
+
+      <Sfx name="tap" at={B.pickerTap} />
+      <Sfx name="shutter" at={B.shutter} />
+      <Sfx name="whoosh" at={B.keyboardUp} />
+      <SfxRepeat name="pop" at={B.suggestions} every={7} times={REPLIES.length} />
+      <Sfx name="tap" at={B.replyTap} />
+      <Sfx name="send" at={B.replyTap + 8} />
+      <Sfx name="riser" at={B.endCard - 42} />
+      <Sfx name="impact" at={B.endCard} />
     </AbsoluteFill>
   );
 };

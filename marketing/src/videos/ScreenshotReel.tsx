@@ -20,6 +20,7 @@ import { HookKeyboard } from "../components/HookKeyboard";
 import { ChatThumb } from "../components/ChatThumb";
 import { ChatMessage, IgChat } from "../components/IgChat";
 import { Phone } from "../components/Phone";
+import { MusicBed, Sfx, SfxRepeat } from "../components/Sfx";
 import { PHONE_WIDTH, PhoneSlot, Stage } from "../components/Stage";
 import { KEYBOARD_HEIGHT } from "../theme";
 
@@ -242,6 +243,24 @@ export const ScreenshotReel: React.FC = () => {
       <Sequence from={B.endCard}>
         <EndCard />
       </Sequence>
+
+      {/* ---------------- sound ---------------- */}
+
+      <MusicBed over={SCREENSHOT_REEL_DURATION} />
+
+      <Sfx name="pop" at={B.herQuestion} volume={0.8} />
+      <Sfx name="shutter" at={B.shutter} />
+      <Sfx name="whoosh" at={B.keyboardUp} />
+      <Sfx name="tap" at={B.generateTap} />
+      <SfxRepeat name="pop" at={B.suggestions} every={7} times={REPLIES.length} />
+      <Sfx name="tap" at={B.replyTap} />
+      <Sfx name="tap" at={B.sendTap} volume={0.85} />
+      <Sfx name="send" at={B.sent} />
+      <Sfx name="sparkle" at={B.sent + 6} />
+      <Sfx name="impact" at={B.stat} volume={0.7} />
+      {/* Riser runs into the end card, so it resolves on the impact. */}
+      <Sfx name="riser" at={B.endCard - 42} />
+      <Sfx name="impact" at={B.endCard} />
     </AbsoluteFill>
   );
 };

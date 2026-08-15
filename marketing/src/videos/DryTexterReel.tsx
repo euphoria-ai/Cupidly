@@ -14,6 +14,7 @@ import { HookKeyboard } from "../components/HookKeyboard";
 import { ChatThumb } from "../components/ChatThumb";
 import { ChatMessage, IgChat } from "../components/IgChat";
 import { Phone } from "../components/Phone";
+import { MusicBed, Sfx, SfxRepeat } from "../components/Sfx";
 import { PHONE_WIDTH, PhoneSlot, Stage } from "../components/Stage";
 import { KEYBOARD_HEIGHT, pebble } from "../theme";
 import { DISPLAY } from "../fonts";
@@ -217,6 +218,24 @@ export const DryTexterReel: React.FC = () => {
       <Sequence from={B.endCard}>
         <EndCard cta="Download Hook — free to try" />
       </Sequence>
+
+      {/* ---------------- sound ---------------- */}
+
+      <MusicBed over={DRY_TEXTER_REEL_DURATION} />
+
+      {/* The dry reply gets a tap, not a send: it goes nowhere. */}
+      <Sfx name="tap" at={B.dryReply} volume={0.7} />
+      {/* The whip is the loudest thing in the reel — it is the whole edit. */}
+      <Sfx name="whoosh" at={B.cut - 5} volume={1.4} />
+      <Sfx name="whoosh" at={B.keyboardUp} volume={0.7} />
+      <SfxRepeat name="pop" at={B.suggestions} every={7} times={3} />
+      <Sfx name="tap" at={B.replyTap} />
+      <Sfx name="send" at={B.sent} />
+      <Sfx name="pop" at={B.comeback} />
+      <Sfx name="sparkle" at={B.comeback + 4} />
+      <Sfx name="impact" at={B.punchline} volume={0.7} />
+      <Sfx name="riser" at={B.endCard - 42} />
+      <Sfx name="impact" at={B.endCard} />
     </AbsoluteFill>
   );
 };
