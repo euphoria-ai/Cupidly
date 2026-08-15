@@ -72,11 +72,18 @@ import kotlinx.coroutines.delay
  *
  * The chat is deliberately plain Instagram colours rather than Hook's theme:
  * the point is that this looks like the app they'll really be typing into.
+ *
+ * @param onExit non-null when this is being replayed from the app ("How to
+ *   Use") rather than run as an onboarding step. It puts the header's back
+ *   arrow to work and gives the switch-keyboard scrim a way out, because a
+ *   screen the user chose to open must always be closeable — during onboarding
+ *   there is nothing behind this to go back to.
  */
 @Composable
 fun DemoChatStep(
     onFinished: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    onExit: (() -> Unit)? = null
 ) {
     val context = LocalContext.current
     val setup = rememberKeyboardSetup()
@@ -136,6 +143,15 @@ fun DemoChatStep(
     }
     val stuck = showSkip || RizzSession.error != null || RizzSession.paywallRequired
 
+    // Leaving means different things in the two places this runs: onboarding
+    // moves on, the how-to closes.
+    val leave: () -> Unit = {
+        RizzSession.reset()
+        ConversationSession.reset()
+        (onExit ?: onFinished)()
+    }
+    val leaveLabel = if (onExit != null) "Back" else "Skip this for now"
+
     // Let the sent message land, then move on — asking for a tap here would
     // just be a button between them and the applause.
     LaunchedEffect(sent) {
@@ -153,7 +169,7 @@ fun DemoChatStep(
                 .fillMaxSize()
                 .imePadding()
         ) {
-            ChatHeader()
+            ChatHeader(onBack = onExit)
 
             LazyColumn(
                 state = listState,
@@ -172,18 +188,14 @@ fun DemoChatStep(
 
             if (stuck && !sent) {
                 Text(
-                    text = "Skip this for now",
+                    text = leaveLabel,
                     style = TextStyle(fontSize = 15.sp, fontWeight = FontWeight.SemiBold),
                     color = InstagramGrayText,
                     textAlign = TextAlign.Center,
                     modifier = Modifier
                         .fillMaxWidth()
                         .clip(RoundedCornerShape(12.dp))
-                        .clickable {
-                            RizzSession.reset()
-                            ConversationSession.reset()
-                            onFinished()
-                        }
+                        .clickable(onClick = leave)
                         .padding(vertical = 10.dp)
                 )
             }
@@ -212,16 +224,11 @@ fun DemoChatStep(
             SwitchKeyboardScrim(
                 onOpenPicker = { PermissionUtils.showKeyboardPicker(context) },
                 // The skip below the composer is behind this scrim, so it was
-                // no use to anyone stuck here. This one is reachable.
-                onSkip = if (stuck) {
-                    {
-                        RizzSession.reset()
-                        ConversationSession.reset()
-                        onFinished()
-                    }
-                } else {
-                    null
-                }
+                // no use to anyone stuck here. This one is reachable — and in
+                // the how-to it is the only way back out, so it isn't gated on
+                // being stuck.
+                onSkip = if (stuck || onExit != null) leave else null,
+                skipLabel = leaveLabel
             )
         }
     }
@@ -270,7 +277,8 @@ private fun Coach(phase: DemoPhase) {
 @Composable
 private fun SwitchKeyboardScrim(
     onOpenPicker: () -> Unit,
-    onSkip: (() -> Unit)?
+    onSkip: (() -> Unit)?,
+    skipLabel: String
 ) {
     Box(
         modifier = Modifier
@@ -345,7 +353,7 @@ private fun SwitchKeyboardScrim(
             if (onSkip != null) {
                 Spacer(modifier = Modifier.height(8.dp))
                 Text(
-                    text = "Skip this for now",
+                    text = skipLabel,
                     style = TextStyle(fontSize = 15.sp, fontWeight = FontWeight.SemiBold),
                     color = Color.White.copy(alpha = 0.85f),
                     modifier = Modifier
@@ -359,7 +367,7 @@ private fun SwitchKeyboardScrim(
 }
 
 @Composable
-private fun ChatHeader() {
+private fun ChatHeader(onBack: (() -> Unit)?) {
     Column {
         Row(
             modifier = Modifier
@@ -367,13 +375,27 @@ private fun ChatHeader() {
                 .padding(horizontal = 12.dp, vertical = 12.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Icon(
-                imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                contentDescription = null,
-                tint = Color.Black,
-                modifier = Modifier.size(26.dp)
-            )
-            Spacer(modifier = Modifier.width(12.dp))
+            // Dressing during onboarding, a real exit in the how-to — where it
+            // also gets a finger-sized target around it.
+            Box(
+                modifier = if (onBack != null) {
+                    Modifier
+                        .size(40.dp)
+                        .clip(CircleShape)
+                        .clickable(onClick = onBack)
+                } else {
+                    Modifier.size(26.dp)
+                },
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                    contentDescription = if (onBack != null) "Back" else null,
+                    tint = Color.Black,
+                    modifier = Modifier.size(26.dp)
+                )
+            }
+            Spacer(modifier = Modifier.width(if (onBack != null) 4.dp else 12.dp))
             Text(
                 text = DemoMatchName,
                 style = TextStyle(fontSize = 22.sp, fontWeight = FontWeight.Bold),

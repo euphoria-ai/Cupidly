@@ -7,6 +7,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -28,15 +29,23 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.tomfricks.hook.keyboard.RizzSession
 import com.tomfricks.hook.keyboard.RizzSession.TranscriptItem
@@ -84,101 +93,136 @@ fun KeyboardPanel(
     // Pro is never nagged and never blocked.
     val showUpsell = paywallRequired && !isPro
 
-    Column(
+    // How much of the panel the fade and the controls cover. The bottom bar
+    // sizes itself from its pill, so this is measured rather than assumed, and
+    // it is what the transcript scrolls through on its way under the fade.
+    val density = LocalDensity.current
+    var controlsHeight by remember { mutableStateOf(0.dp) }
+
+    Box(
         modifier = modifier
             .fillMaxWidth()
             .height(PanelHeight)
             .background(MaterialTheme.colorScheme.background)
-            .padding(horizontal = 12.dp, vertical = 10.dp)
     ) {
-        if (!isPro && !showUpsell) {
-            AllowanceChip(
-                remaining = freeRemaining,
-                onClick = onUpgradeClick
-            )
-            Spacer(modifier = Modifier.height(6.dp))
-        }
-
-        Box(
+        // The chat runs the full height of the panel and passes behind the
+        // controls — that's what the fade is fading. Laid out under it rather
+        // than above it, the transcript would simply stop at the fade's top
+        // edge, which reads as a hard band no matter how soft the gradient is.
+        Column(
             modifier = Modifier
-                .fillMaxWidth()
-                .weight(1f)
+                .fillMaxSize()
+                .padding(start = 12.dp, end = 12.dp, top = 10.dp)
         ) {
-            if (items.isEmpty()) {
-                // Nothing to talk about yet: no chat, no screenshot card — just
-                // the logo and what to do next.
-                EmptyState(
-                    isDarkTheme = isDarkTheme,
-                    title = if (state == RizzSession.Status.ERROR) {
-                        "Couldn't read that one"
-                    } else {
-                        "Take a screenshot"
-                    },
-                    body = if (state == RizzSession.Status.ERROR) {
-                        errorMessage ?: "Something went wrong"
-                    } else {
-                        "So Hook knows what's on your screen"
-                    }
+            if (!isPro && !showUpsell) {
+                AllowanceChip(
+                    remaining = freeRemaining,
+                    onClick = onUpgradeClick
                 )
-            } else {
-                ChatTranscript(
-                    transcript = items,
-                    state = state,
-                    errorMessage = errorMessage,
-                    isDarkTheme = isDarkTheme,
-                    onSuggestionClick = onSuggestionClick
-                )
+                Spacer(modifier = Modifier.height(6.dp))
+            }
+
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f)
+            ) {
+                if (items.isEmpty()) {
+                    // Nothing to talk about yet: no chat, no screenshot card — just
+                    // the logo and what to do next. Nothing scrolls, so this is
+                    // centred in the clear space instead of under the controls.
+                    EmptyState(
+                        isDarkTheme = isDarkTheme,
+                        title = if (state == RizzSession.Status.ERROR) {
+                            "Couldn't read that one"
+                        } else {
+                            "Take a screenshot"
+                        },
+                        body = if (state == RizzSession.Status.ERROR) {
+                            errorMessage ?: "Something went wrong"
+                        } else {
+                            "So Hook knows what's on your screen"
+                        },
+                        modifier = Modifier.padding(bottom = controlsHeight)
+                    )
+                } else {
+                    ChatTranscript(
+                        transcript = items,
+                        state = state,
+                        errorMessage = errorMessage,
+                        isDarkTheme = isDarkTheme,
+                        onSuggestionClick = onSuggestionClick,
+                        // Lets the newest reply settle clear of the controls
+                        // while older ones keep scrolling up through the fade.
+                        bottomInset = controlsHeight
+                    )
+                }
             }
         }
 
-        // The controls rest on a dark, semi-transparent fade that rises off the
-        // bottom of the chat, so the "Generate rizz" pill and its neighbours read
-        // clearly over the transcript without a hard band.
-        Box(modifier = Modifier.fillMaxWidth()) {
+        // The controls rest on a dark fade that rises off the bottom of the
+        // panel, so the "Generate rizz" pill and its neighbours read clearly
+        // over the chat passing behind them and the chat dissolves into the
+        // dark instead of being cut off by it.
+        //
+        // Drawn edge to edge with the padding on the controls inside it: inset
+        // the fade itself and the gradient stops short of the panel, leaving a
+        // bright margin around three of its sides.
+        Column(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .fillMaxWidth()
+                .onSizeChanged {
+                    controlsHeight = with(density) { it.height.toDp() }
+                }
+                .background(
+                    Brush.verticalGradient(
+                        // Weighted towards the top so most of the height is
+                        // spent going from nothing to faint. An even ramp puts
+                        // half the darkening in the first few pixels, and that
+                        // start edge is exactly what shows up as a seam.
+                        0.0f to Color.Transparent,
+                        0.45f to Color.Black.copy(alpha = 0.10f),
+                        0.75f to Color.Black.copy(alpha = 0.38f),
+                        1.0f to Color.Black.copy(alpha = 0.66f)
+                    )
+                )
+                .padding(start = 12.dp, end = 12.dp, bottom = 10.dp)
+        ) {
+            // The run-up: chat visible through the fade before it is dark
+            // enough to sit controls on. Too short and there is no dissolve,
+            // only a step. The upsell line sits inside it rather than in place
+            // of it, so the fade is the same height either way.
             Box(
                 modifier = Modifier
-                    .matchParentSize()
-                    .background(
-                        Brush.verticalGradient(
-                            colors = listOf(
-                                Color.Transparent,
-                                Color.Black.copy(alpha = 0.6f)
-                            )
-                        )
-                    )
-            )
-
-            Column {
+                    .fillMaxWidth()
+                    .height(56.dp),
+                contentAlignment = Alignment.Center
+            ) {
                 if (showUpsell) {
-                    // Sits where the fade normally is, so the panel keeps its
-                    // height and the transcript stays readable behind it.
                     Text(
                         text = "You're out of free rizz. Go Pro for unlimited.",
                         style = MaterialTheme.typography.bodySmall,
-                        color = Color.White,
+                        // This lands in the near-transparent top of the fade,
+                        // so the panel background — not the scrim — is what it
+                        // has to read against. White vanished in light theme.
+                        color = MaterialTheme.colorScheme.onBackground,
                         textAlign = TextAlign.Center,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 8.dp)
-                            .height(28.dp)
+                        modifier = Modifier.padding(horizontal = 8.dp)
                     )
-                } else {
-                    // Fade zone above the bar — this is the "bit of chat" the
-                    // scrim covers before darkening behind the controls.
-                    Spacer(modifier = Modifier.height(28.dp))
                 }
-
-                KeyboardBottomBar(
-                    state = state,
-                    hasReplies = hasReplies,
-                    showUpsell = showUpsell,
-                    onGenerate = onGenerate,
-                    onUpgradeClick = onUpgradeClick,
-                    onNewChatClick = onNewChatClick,
-                    onSettingsClick = onSettingsClick,
-                    onBackspaceClick = onBackspaceClick
-                )
             }
+
+            KeyboardBottomBar(
+                state = state,
+                hasReplies = hasReplies,
+                showUpsell = showUpsell,
+                onGenerate = onGenerate,
+                onUpgradeClick = onUpgradeClick,
+                onNewChatClick = onNewChatClick,
+                onSettingsClick = onSettingsClick,
+                onBackspaceClick = onBackspaceClick
+            )
         }
     }
 }
@@ -230,6 +274,9 @@ private fun ScreenshotCard(
         modifier = modifier
             .width(210.dp)
             .height(150.dp)
+            // Lifted off the transcript a little more than the bubbles are —
+            // this is a photo pinned to the chat, not another message in it.
+            .shadow(elevation = 8.dp, shape = shape)
             .clip(shape)
             .background(
                 color = if (isDarkTheme) Color(0xFF141B2B) else Color(0xFFEDF1F9),
@@ -262,7 +309,8 @@ private fun ChatTranscript(
     state: RizzSession.Status,
     errorMessage: String?,
     isDarkTheme: Boolean,
-    onSuggestionClick: (String) -> Unit
+    onSuggestionClick: (String) -> Unit,
+    bottomInset: Dp = 0.dp
 ) {
     val listState = rememberLazyListState()
     val showError = state == RizzSession.Status.ERROR && errorMessage != null
@@ -277,6 +325,7 @@ private fun ChatTranscript(
     LazyColumn(
         state = listState,
         modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(bottom = bottomInset),
         verticalArrangement = Arrangement.spacedBy(8.dp),
         horizontalAlignment = Alignment.End
     ) {
@@ -411,10 +460,11 @@ private fun KeyboardBottomBar(
 private fun EmptyState(
     isDarkTheme: Boolean,
     title: String,
-    body: String
+    body: String,
+    modifier: Modifier = Modifier
 ) {
     Column(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxSize()
             .padding(horizontal = 24.dp),
         horizontalAlignment = Alignment.CenterHorizontally,

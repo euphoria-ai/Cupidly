@@ -833,13 +833,13 @@ private val REVIEWS = listOf(
         headline = "no more dry texts",
         body = "i used to overthink every reply for ten minutes. now it takes ten " +
             "seconds and the convo actually goes somewhere.",
-        handle = "mattmakesmoves"
+        handle = "matt_parr"
     ),
     Review(
-        headline = "matched → date in 3 days",
+        headline = "matched date in 3 days",
         body = "the tones are unreal. funny when i want funny, smooth when i want " +
             "smooth. my matches think i got way funnier overnight.",
-        handle = "casey.l"
+        handle = "abhinav.s"
     )
 )
 
