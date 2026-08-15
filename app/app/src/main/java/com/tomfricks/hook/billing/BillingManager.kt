@@ -11,12 +11,14 @@ import com.revenuecat.purchases.Package
 import com.revenuecat.purchases.PurchaseParams
 import com.revenuecat.purchases.Purchases
 import com.revenuecat.purchases.PurchasesConfiguration
+import com.revenuecat.purchases.PurchasesErrorCode
 import com.revenuecat.purchases.PurchasesException
 import com.revenuecat.purchases.PurchasesTransactionException
 import com.revenuecat.purchases.awaitCustomerInfo
 import com.revenuecat.purchases.awaitOfferings
 import com.revenuecat.purchases.awaitPurchase
 import com.revenuecat.purchases.awaitRestore
+import com.revenuecat.purchases.awaitSyncPurchases
 import com.revenuecat.purchases.interfaces.UpdatedCustomerInfoListener
 import com.tomfricks.hook.BuildConfig
 import com.tomfricks.hook.api.ApiService
@@ -30,7 +32,10 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 
 /** What came back from a purchase or a restore, in terms the UI cares about. */
 sealed interface PurchaseResult {
@@ -110,7 +115,20 @@ object BillingManager {
     private const val ENTITLEMENT_RECHECK_ATTEMPTS = 3
     private const val ENTITLEMENT_RECHECK_DELAY_MS = 800L
 
+    /**
+     * Play Billing can stall. After this we stop waiting and let the UI
+     * proceed on whatever CustomerInfo we already have, rather than freezing
+     * onboarding or the paywall on a dead store connection.
+     */
+    private const val STORE_SYNC_TIMEOUT_MS = 15_000L
+
+    /** Slightly longer than the sync itself, so waiters see [purchasesSynced]. */
+    private const val STORE_SYNC_WAIT_MS = STORE_SYNC_TIMEOUT_MS + 2_000L
+
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+
+    /** One in-flight store sync at a time, so a Restore tap can't race launch. */
+    private val storeSyncMutex = Mutex()
 
     private var preferencesRepository: PreferencesRepository? = null
 
@@ -134,6 +152,16 @@ object BillingManager {
 
     /** False when there is no SDK key, i.e. no purchase can be made at all. */
     val isAvailable: StateFlow<Boolean> = _isAvailable.asStateFlow()
+
+    private val _purchasesSynced = MutableStateFlow(false)
+
+    /**
+     * True once this process has asked Play for existing purchases (or decided
+     * it never will, e.g. no SDK key). The paywall must not open before this:
+     * a subscriber who reinstalled has a new install id, and until Play has
+     * attached their subscription to it they look like a free user.
+     */
+    val purchasesSynced: StateFlow<Boolean> = _purchasesSynced.asStateFlow()
 
     private val _purchaseInFlight = MutableStateFlow(false)
 
@@ -184,6 +212,7 @@ object BillingManager {
                 TAG,
                 "No REVENUECAT_PUBLIC_SDK_KEY in local.properties — purchases are disabled"
             )
+            _purchasesSynced.value = true
             return
         }
 
@@ -203,11 +232,27 @@ object BillingManager {
 
         _isAvailable.value = true
 
-        // Entitlement only — deliberately *not* offerings. This runs from
-        // Application.onCreate, and RevenueCat pre-fetches the offerings cache
-        // on its own; asking here just adds a network request at launch for a
-        // paywall the user may never open. PaywallScreen fetches on entry.
-        scope.launch { refreshCustomerInfo() }
+        // Attach this Google Play account's existing purchases to this install
+        // id. Without this, a subscriber who uninstalled (or switched phones)
+        // looks free until they hunt for Restore — and we would show them the
+        // paywall at the end of onboarding.
+        //
+        // syncPurchases, not restorePurchases: restore is the user-tapped
+        // button (and can prompt a store sign-in). This is the silent launch
+        // path. Offerings stay unfetched; PaywallScreen loads those on entry.
+        scope.launch { syncPurchasesFromStore() }
+    }
+
+    /**
+     * Suspend until [purchasesSynced] is true, or [STORE_SYNC_TIMEOUT_MS]
+     * elapses. Callers that must not treat a subscriber as free — the
+     * post-onboarding paywall, the keyboard's paywall intent — wait here.
+     */
+    suspend fun awaitPurchasesSynced() {
+        if (_purchasesSynced.value) return
+        withTimeoutOrNull(STORE_SYNC_WAIT_MS) {
+            _purchasesSynced.first { it }
+        }
     }
 
     /** Fire-and-forget refresh for callers that aren't in a coroutine (Activity.onResume). */
@@ -328,6 +373,11 @@ object BillingManager {
         } catch (e: PurchasesTransactionException) {
             if (e.userCancelled) {
                 PurchaseResult.Cancelled
+            } else if (e.error.code == PurchasesErrorCode.ProductAlreadyPurchasedError) {
+                // Same Play account already owns it — typical after reinstall
+                // if they tap Subscribe instead of waiting for the launch sync.
+                Log.i(TAG, "Play says this account already owns the product — syncing")
+                restorePurchases()
             } else {
                 Log.e(TAG, "Purchase failed: ${e.message}")
                 PurchaseResult.Failed(e.message)
@@ -369,27 +419,71 @@ object BillingManager {
 
     /** Bring back a subscription bought on another install of the same account. */
     suspend fun restorePurchases(): PurchaseResult {
+        return syncWithPlay(userInitiated = true)
+    }
+
+    /**
+     * Ask Play for purchases on this Google account and attach them to this
+     * install's RevenueCat user.
+     *
+     * Launch path uses [awaitSyncPurchases] so we never trigger a store
+     * sign-in prompt. The Restore button uses [awaitRestore], which is the
+     * user-initiated equivalent.
+     */
+    private suspend fun syncPurchasesFromStore() {
+        syncWithPlay(userInitiated = false)
+    }
+
+    private suspend fun syncWithPlay(userInitiated: Boolean): PurchaseResult {
         if (!Purchases.isConfigured) {
+            _purchasesSynced.value = true
             return PurchaseResult.Failed("Purchases aren't available right now")
         }
-        return try {
-            val customerInfo = Purchases.sharedInstance.awaitRestore()
-            onCustomerInfo(customerInfo)
-            if (customerInfo.hasPro()) {
-                PurchaseResult.Success
-            } else {
-                PurchaseResult.Failed("No active $PRO_DISPLAY_NAME subscription found")
+
+        return storeSyncMutex.withLock {
+            try {
+                val result = withTimeoutOrNull(STORE_SYNC_TIMEOUT_MS) {
+                    try {
+                        val customerInfo = if (userInitiated) {
+                            Purchases.sharedInstance.awaitRestore()
+                        } else {
+                            Purchases.sharedInstance.awaitSyncPurchases()
+                        }
+                        onCustomerInfo(customerInfo)
+                        if (customerInfo.hasPro()) {
+                            PurchaseResult.Success
+                        } else if (userInitiated) {
+                            PurchaseResult.Failed("No active $PRO_DISPLAY_NAME subscription found")
+                        } else {
+                            // Launch sync found nothing. That's a real free user.
+                            PurchaseResult.Cancelled
+                        }
+                    } catch (e: PurchasesTransactionException) {
+                        if (e.userCancelled) {
+                            PurchaseResult.Cancelled
+                        } else {
+                            Log.e(TAG, "Store sync failed: ${e.message}")
+                            PurchaseResult.Failed(e.message)
+                        }
+                    } catch (e: PurchasesException) {
+                        Log.e(TAG, "Store sync failed: ${e.message}")
+                        PurchaseResult.Failed(e.message)
+                    }
+                }
+
+                if (result == null) {
+                    Log.w(TAG, "Store sync timed out after ${STORE_SYNC_TIMEOUT_MS}ms")
+                    refreshCustomerInfo()
+                } else if (result is PurchaseResult.Failed && !userInitiated) {
+                    // Don't leave launch in a hole: fall back to whatever RC
+                    // already cached for this install id.
+                    refreshCustomerInfo()
+                }
+
+                result ?: PurchaseResult.Failed("Couldn't reach Google Play. Try Restore purchases.")
+            } finally {
+                _purchasesSynced.value = true
             }
-        } catch (e: PurchasesTransactionException) {
-            if (e.userCancelled) {
-                PurchaseResult.Cancelled
-            } else {
-                Log.e(TAG, "Restore failed: ${e.message}")
-                PurchaseResult.Failed(e.message)
-            }
-        } catch (e: PurchasesException) {
-            Log.e(TAG, "Restore failed: ${e.message}")
-            PurchaseResult.Failed(e.message)
         }
     }
 
@@ -443,3 +537,12 @@ object BillingManager {
         }
     }
 }
+
+/**
+ * The automatic paywall is only honest once Play has had a chance to attach
+ * an existing subscription to this install. Showing it earlier sells Pro to
+ * people who already pay.
+ */
+internal fun shouldPresentPaywall(isPro: Boolean, purchasesSynced: Boolean): Boolean =
+    purchasesSynced && !isPro
+

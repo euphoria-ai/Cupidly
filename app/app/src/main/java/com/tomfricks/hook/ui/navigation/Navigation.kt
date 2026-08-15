@@ -8,6 +8,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.navigation.compose.NavHost
@@ -15,6 +18,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import com.tomfricks.hook.HookApplication
 import com.tomfricks.hook.billing.BillingManager
+import com.tomfricks.hook.billing.shouldPresentPaywall
 import com.tomfricks.hook.ui.screens.demo.DemoScreen
 import com.tomfricks.hook.ui.screens.home.HomeScreen
 import com.tomfricks.hook.ui.screens.onboarding.OnboardingFlow
@@ -54,8 +58,10 @@ fun HookNavigation(paywallRequest: Int = 0) {
         initial = null
     )
     val isPro by BillingManager.isPro.collectAsState()
+    val purchasesSynced by BillingManager.purchasesSynced.collectAsState()
 
     val navController = rememberNavController()
+    var offerPaywallAfterOnboarding by remember { mutableStateOf(false) }
 
     val preferences = userPreferences
     if (preferences == null) {
@@ -79,6 +85,24 @@ fun HookNavigation(paywallRequest: Int = 0) {
 
     LaunchedEffect(paywallRequest) {
         if (paywallRequest > 0) {
+            BillingManager.awaitPurchasesSynced()
+            if (!BillingManager.isPro.value) {
+                navController.navigate(Screen.Paywall.route)
+            }
+        }
+    }
+
+    LaunchedEffect(offerPaywallAfterOnboarding, purchasesSynced, isPro) {
+        if (!offerPaywallAfterOnboarding) return@LaunchedEffect
+        if (!purchasesSynced) {
+            BillingManager.awaitPurchasesSynced()
+        }
+        offerPaywallAfterOnboarding = false
+        if (shouldPresentPaywall(
+                isPro = BillingManager.isPro.value,
+                purchasesSynced = BillingManager.purchasesSynced.value
+            )
+        ) {
             navController.navigate(Screen.Paywall.route)
         }
     }
@@ -105,9 +129,11 @@ fun HookNavigation(paywallRequest: Int = 0) {
                     // allowed to pick. Ask for the upgrade here, while that's
                     // still fresh — and push it on top of Home, so closing it
                     // lands them in the app rather than back in onboarding.
-                    if (!isPro) {
-                        navController.navigate(Screen.Paywall.route)
-                    }
+                    //
+                    // Wait for the launch Play sync first: a subscriber who
+                    // reinstalled would otherwise get sold a plan they already
+                    // pay for.
+                    offerPaywallAfterOnboarding = true
                 },
                 // Back out of the first question and you're on the last pitch
                 // slide again, which is where you came from.

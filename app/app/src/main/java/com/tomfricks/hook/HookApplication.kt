@@ -30,6 +30,11 @@ class HookApplication : Application() {
             val appUserId = preferencesRepository.getOrCreateAppUserId()
             BillingManager.configure(this@HookApplication, appUserId, preferencesRepository)
 
+            // Wait for Play to attach any existing subscription to this install
+            // before asking the server. Otherwise /me caches "not Pro" for a
+            // subscriber who just reinstalled, and generations 402 until TTL.
+            BillingManager.awaitPurchasesSynced()
+
             // Refresh the cached allowance so the keyboard's "N free left" is
             // right before the user generates anything this session.
             ApiService(this@HookApplication).fetchEntitlement()
