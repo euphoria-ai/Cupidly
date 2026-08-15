@@ -9,7 +9,9 @@ import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalContext
@@ -113,7 +115,19 @@ fun HookTheme(
 
     MaterialTheme(
         colorScheme = colorScheme,
-        typography = Typography,
-        content = content
-    )
+        typography = Typography
+    ) {
+        CompositionLocalProvider(LocalHookDarkTheme provides darkTheme, content = content)
+    }
 }
+
+/**
+ * Whether [HookTheme] resolved to its dark palette.
+ *
+ * Not the same question as `isSystemInDarkTheme()`: the Theme setting can force
+ * Light or Dark against the system, and that override lives entirely in Compose
+ * — it never reaches the resource configuration. Anything that has to pick a
+ * light-vs-dark *asset* must read this, because `-night` resource qualifiers
+ * follow the system and would show the wrong artwork whenever the two disagree.
+ */
+val LocalHookDarkTheme = staticCompositionLocalOf { false }

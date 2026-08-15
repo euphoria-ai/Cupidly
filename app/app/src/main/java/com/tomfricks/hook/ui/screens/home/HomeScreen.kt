@@ -1,6 +1,5 @@
 package com.tomfricks.hook.ui.screens.home
 
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -17,7 +16,17 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.outlined.Notes
+import androidx.compose.material.icons.automirrored.outlined.ShortText
 import androidx.compose.material.icons.filled.ChevronRight
+import androidx.compose.material.icons.outlined.Badge
+import androidx.compose.material.icons.outlined.Brush
+import androidx.compose.material.icons.outlined.Contrast
+import androidx.compose.material.icons.outlined.EmojiEmotions
+import androidx.compose.material.icons.outlined.FavoriteBorder
+import androidx.compose.material.icons.outlined.Person
+import androidx.compose.material.icons.outlined.RecordVoiceOver
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
@@ -32,10 +41,9 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import com.tomfricks.hook.R
 import com.tomfricks.hook.billing.BillingManager
 import com.tomfricks.hook.billing.PurchaseResult
 import com.tomfricks.hook.data.EmojiUse
@@ -46,6 +54,7 @@ import com.tomfricks.hook.data.PreferencesRepository
 import com.tomfricks.hook.data.ReplyLength
 import com.tomfricks.hook.data.ThemeMode
 import com.tomfricks.hook.data.UserPreferences
+import com.tomfricks.hook.ui.theme.HookMark
 import com.tomfricks.hook.ui.theme.PebbleButton
 import com.tomfricks.hook.ui.theme.PebbleDialog
 import com.tomfricks.hook.ui.theme.PebbleOption
@@ -53,6 +62,7 @@ import com.tomfricks.hook.ui.theme.PebbleRow
 import com.tomfricks.hook.ui.theme.PebbleTextButton
 import com.tomfricks.hook.ui.theme.PebbleTone
 import com.tomfricks.hook.ui.theme.ProBadge
+import com.tomfricks.hook.ui.theme.settingIconTint
 import kotlinx.coroutines.launch
 
 /** Display names of the choices that only Hook Pro can pick. */
@@ -62,7 +72,6 @@ private val proReplyLengths = ReplyLength.values().filter { it.proOnly }.map { i
 
 @Composable
 fun HomeScreen(
-    onNavigateToGuide: () -> Unit,
     onNavigateToDemo: () -> Unit,
     onNavigateToPaywall: () -> Unit,
     onNavigateToCustomerCenter: () -> Unit,
@@ -103,22 +112,15 @@ fun HomeScreen(
     ) {
         Spacer(modifier = Modifier.height(32.dp))
 
-        // App Icon - same art as the launcher icon
-        Image(
-            painter = painterResource(
-                id = R.mipmap.ic_launcher_foreground
-            ),
-            contentDescription = "Hook",
-            modifier = Modifier.size(120.dp),
-        )
+        HookMark(size = 120.dp)
 
         Spacer(modifier = Modifier.height(24.dp))
 
         Text(
             text = "Hook",
             style = MaterialTheme.typography.displayMedium,
-            fontWeight = FontWeight.Bold,
-            color = MaterialTheme.colorScheme.primary
+            fontWeight = FontWeight.Normal,
+            color = MaterialTheme.colorScheme.onBackground
         )
 
         Text(
@@ -130,16 +132,9 @@ fun HomeScreen(
         Spacer(modifier = Modifier.height(40.dp))
 
         PebbleButton(
-            text = "Try the demo",
-            onClick = onNavigateToDemo
-        )
-
-        Spacer(modifier = Modifier.height(12.dp))
-
-        PebbleButton(
             text = "How to Use",
-            onClick = onNavigateToGuide,
-            tone = PebbleTone.SLATE
+            subtitle = "Learn how to use Hook",
+            onClick = onNavigateToDemo
         )
 
         Spacer(modifier = Modifier.height(24.dp))
@@ -208,6 +203,7 @@ fun HomeScreen(
         Spacer(modifier = Modifier.height(16.dp))
 
         SettingPebble(
+            icon = Icons.Outlined.Brush,
             title = "Style",
             subtitle = currentPreferences.style.displayName,
             onClick = { showStyleDropdown = true }
@@ -216,6 +212,7 @@ fun HomeScreen(
         Spacer(modifier = Modifier.height(12.dp))
 
         SettingPebble(
+            icon = Icons.Outlined.RecordVoiceOver,
             title = "Tone",
             subtitle = currentPreferences.tone.displayName,
             onClick = { showToneDropdown = true }
@@ -224,6 +221,7 @@ fun HomeScreen(
         Spacer(modifier = Modifier.height(12.dp))
 
         SettingPebble(
+            icon = Icons.Outlined.FavoriteBorder,
             title = "Flirt Level",
             subtitle = currentPreferences.flirtLevel.displayName,
             onClick = { showFlirtDropdown = true }
@@ -232,6 +230,7 @@ fun HomeScreen(
         Spacer(modifier = Modifier.height(12.dp))
 
         SettingPebble(
+            icon = Icons.AutoMirrored.Outlined.ShortText,
             title = "Reply Length",
             subtitle = currentPreferences.replyLength.displayName,
             onClick = { showLengthDropdown = true }
@@ -240,6 +239,7 @@ fun HomeScreen(
         Spacer(modifier = Modifier.height(12.dp))
 
         SettingPebble(
+            icon = Icons.Outlined.EmojiEmotions,
             title = "Emoji Use",
             subtitle = currentPreferences.emojiUse.displayName,
             onClick = { showEmojiDropdown = true }
@@ -248,6 +248,7 @@ fun HomeScreen(
         Spacer(modifier = Modifier.height(12.dp))
 
         SettingPebble(
+            icon = Icons.Outlined.Contrast,
             title = "Theme",
             subtitle = currentPreferences.themeMode.displayName,
             onClick = { showThemeDropdown = true }
@@ -267,6 +268,7 @@ fun HomeScreen(
         Spacer(modifier = Modifier.height(16.dp))
 
         SettingPebble(
+            icon = Icons.Outlined.Person,
             title = "Gender",
             subtitle = currentPreferences.profileGender.ifEmpty { "Not set" },
             onClick = { showGenderDropdown = true }
@@ -275,6 +277,7 @@ fun HomeScreen(
         Spacer(modifier = Modifier.height(12.dp))
 
         SettingPebble(
+            icon = Icons.Outlined.Badge,
             title = "Pronouns",
             subtitle = currentPreferences.profilePronouns.ifEmpty { "Not set" },
             onClick = { showPronounsDropdown = true }
@@ -283,6 +286,7 @@ fun HomeScreen(
         Spacer(modifier = Modifier.height(12.dp))
 
         SettingPebble(
+            icon = Icons.AutoMirrored.Outlined.Notes,
             title = "Bio",
             subtitle = currentPreferences.profileBio.ifEmpty { "Tell us about yourself" },
             onClick = { showBioDialog = true }
@@ -533,8 +537,13 @@ fun HomeScreen(
     }
 }
 
+/**
+ * One picker row. The [icon] is what the row is *about*, tinted neutral so the
+ * column of them reads as structure rather than nine competing colours.
+ */
 @Composable
 private fun SettingPebble(
+    icon: ImageVector,
     title: String,
     subtitle: String,
     onClick: () -> Unit,
@@ -545,7 +554,15 @@ private fun SettingPebble(
         subtitle = subtitle,
         onClick = onClick,
         modifier = modifier,
-        trailingIcon = Icons.Default.ChevronRight
+        trailingIcon = Icons.Default.ChevronRight,
+        leading = {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                tint = settingIconTint,
+                modifier = Modifier.size(22.dp)
+            )
+        }
     )
 }
 
