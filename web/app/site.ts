@@ -1,7 +1,7 @@
 export const site = {
   name: "Hook",
   tagline: "#1 AI Rizz Keyboard",
-  url: "https://hook.app",
+  url: "https://hook.tomlin7.com",
   supportEmail: "hello@tomlin7.com",
   playStoreUrl:
     "https://play.google.com/store/apps/details?id=app.hook",
