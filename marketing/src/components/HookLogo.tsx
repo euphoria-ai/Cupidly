@@ -1,40 +1,29 @@
 import React from "react";
+import { Img, staticFile } from "remotion";
 
 /**
- * The app mark, redrawn from `web/public/app-icon.svg` so the reel does not
- * depend on a binary asset that could go stale.
+ * The app mark, served from `marketing/public/` so the reels use the same
+ * artwork as `branding/`.
+ *
+ *  - hook-logo-tile.png -> branding/darkmode_filled.png (light tile, dark mark)
+ *  - hook-logo-mark.png -> branding/darkmode_nobg.png   (white mark, no tile)
+ *
+ * Both variants are the dark-mode set because every reel plays on the dark
+ * `stage` backdrop. If the backdrop ever goes light, swap in the lightmode
+ * files rather than recolouring here.
  */
 export const HookLogo: React.FC<{ size: number; tile?: boolean }> = ({
   size,
   tile = true,
 }) => (
-  <svg width={size} height={size} viewBox="0 0 180 180">
-    <defs>
-      <linearGradient id="hook-tile" x1="0" y1="0" x2="0" y2="1">
-        <stop offset="0" stopColor="#ffffff" />
-        <stop offset="1" stopColor="#e6e8ec" />
-      </linearGradient>
-    </defs>
-    {tile && (
-      <rect
-        x="0"
-        y="0"
-        width="180"
-        height="180"
-        rx="42"
-        fill="url(#hook-tile)"
-      />
-    )}
-    <g
-      fill="none"
-      stroke={tile ? "#0a0a0a" : "#F2F5FB"}
-      strokeWidth="11"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      <path d="M116 64a44 44 0 1 0 12 30" />
-      <path d="M64 116 122 58" />
-      <path d="M96 58h26v26" />
-    </g>
-  </svg>
+  <Img
+    src={staticFile(tile ? "hook-logo-tile.png" : "hook-logo-mark.png")}
+    style={{
+      width: size,
+      height: size,
+      // The source art is 1024x1049, so the tile crops the 2% overhang instead
+      // of letterboxing white edges inside the rounded container.
+      objectFit: tile ? "cover" : "contain",
+    }}
+  />
 );

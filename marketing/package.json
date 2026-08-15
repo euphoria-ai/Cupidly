@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "remotion studio",
     "studio": "remotion studio",
+    "audio": "node scripts/make-audio.mjs",
     "render:screenshot": "remotion render ScreenshotReel out/hook-screenshot.mp4",
     "render:dry": "remotion render DryTexterReel out/hook-dry-texter.mp4",
     "render:how": "remotion render HowItWorksReel out/hook-how-it-works.mp4",
