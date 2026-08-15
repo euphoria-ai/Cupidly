@@ -10,7 +10,7 @@ plugins {
 // is NOT required to build/sync/assembleDebug. Release stays unsigned when absent.
 //
 // Add these keys to local.properties (kept out of git) to enable release signing:
-//   RELEASE_STORE_FILE=/absolute/path/to/keystore.jks
+//   RELEASE_STORE_FILE=hook-upload.jks   (relative to this repo's app/ dir, or absolute)
 //   RELEASE_STORE_PASSWORD=your-store-password
 //   RELEASE_KEY_ALIAS=your-key-alias
 //   RELEASE_KEY_PASSWORD=your-key-password
@@ -20,12 +20,29 @@ val keystoreProperties = Properties().apply {
         propsFile.inputStream().use { load(it) }
     }
 }
+
+// java.util.Properties keeps quotes verbatim, so RELEASE_STORE_PASSWORD="hunter2"
+// would be read as the 9-character string including the quotes and the keystore
+// would refuse to open. Trim whitespace and one matching pair of surrounding
+// quotes so both quoted and unquoted values in local.properties behave the same.
+fun secret(name: String): String {
+    val raw = keystoreProperties.getProperty(name)?.trim().orEmpty()
+    val unquoted = if (raw.length >= 2 &&
+        ((raw.startsWith("\"") && raw.endsWith("\"")) || (raw.startsWith("'") && raw.endsWith("'")))
+    ) {
+        raw.substring(1, raw.length - 1)
+    } else {
+        raw
+    }
+    return unquoted
+}
+
 val hasReleaseSigning = listOf(
     "RELEASE_STORE_FILE",
     "RELEASE_STORE_PASSWORD",
     "RELEASE_KEY_ALIAS",
     "RELEASE_KEY_PASSWORD",
-).all { keystoreProperties.getProperty(it)?.isNotBlank() == true }
+).all { secret(it).isNotBlank() }
 
 // Client secrets come from the same (gitignored) local.properties file and are
 // exposed as BuildConfig constants. Both default to "" so a fresh clone still
@@ -44,10 +61,15 @@ val hasReleaseSigning = listOf(
 // The RevenueCat *public* SDK key is designed to ship inside the app. Never put
 // the RevenueCat secret key (or any Supabase key) here — those are server-only.
 fun secretLiteral(name: String): String {
-    val raw = keystoreProperties.getProperty(name)?.trim().orEmpty()
-    val escaped = raw.replace("\\", "\\\\").replace("\"", "\\\"")
+    val escaped = secret(name).replace("\\", "\\\\").replace("\"", "\\\"")
     return "\"$escaped\""
 }
+
+// Every Play upload needs a versionCode higher than the last one that reached
+// the console. Override at build time instead of editing this file:
+//   ./gradlew bundleRelease -PhookVersionCode=2 -PhookVersionName=1.0.1
+val hookVersionCode = (findProperty("hookVersionCode") as String?)?.toInt() ?: 1
+val hookVersionName = (findProperty("hookVersionName") as String?) ?: "1.0"
 
 android {
     namespace = "com.tomfricks.hook"
@@ -57,8 +79,8 @@ android {
         applicationId = "com.tom7.hook"
         minSdk = 29
         targetSdk = 35
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = hookVersionCode
+        versionName = hookVersionName
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
@@ -69,10 +91,13 @@ android {
     signingConfigs {
         if (hasReleaseSigning) {
             create("release") {
-                storeFile = file(keystoreProperties.getProperty("RELEASE_STORE_FILE"))
-                storePassword = keystoreProperties.getProperty("RELEASE_STORE_PASSWORD")
-                keyAlias = keystoreProperties.getProperty("RELEASE_KEY_ALIAS")
-                keyPassword = keystoreProperties.getProperty("RELEASE_KEY_PASSWORD")
+                // Resolved against the root project so a bare file name such as
+                // RELEASE_STORE_FILE=hook-upload.jks points at the keystore next
+                // to local.properties rather than inside app/.
+                storeFile = rootProject.file(secret("RELEASE_STORE_FILE"))
+                storePassword = secret("RELEASE_STORE_PASSWORD")
+                keyAlias = secret("RELEASE_KEY_ALIAS")
+                keyPassword = secret("RELEASE_KEY_PASSWORD")
             }
         }
     }
