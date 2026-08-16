@@ -50,7 +50,8 @@ val hasReleaseSigning = listOf(
 //
 // Add these keys to local.properties (one per line, no quotes, no spaces
 // around the "=") to wire the app up for real:
-//   REVENUECAT_PUBLIC_SDK_KEY=test_XXXXXXXXXXXXXXXXXXXXXXXXXXX
+//   REVENUECAT_PUBLIC_SDK_KEY=goog_XXXXXXXXXXXXXXXXXXXXXXXXXXX
+//   REVENUECAT_TEST_SDK_KEY=test_XXXXXXXXXXXXXXXXXXXXXXXXXXX   (optional)
 //   APP_API_KEY=the-shared-key-the-Hook-server-expects
 //
 // The key prefix decides which store the SDK talks to, and the SDK works it out
@@ -60,9 +61,42 @@ val hasReleaseSigning = listOf(
 //
 // The RevenueCat *public* SDK key is designed to ship inside the app. Never put
 // the RevenueCat secret key (or any Supabase key) here — those are server-only.
-fun secretLiteral(name: String): String {
-    val escaped = secret(name).replace("\\", "\\\\").replace("\"", "\\\"")
+fun quoteLiteral(value: String): String {
+    val escaped = value.replace("\\", "\\\\").replace("\"", "\\\"")
     return "\"$escaped\""
+}
+
+fun secretLiteral(name: String): String = quoteLiteral(secret(name))
+
+// The build types deliberately read *different* properties for the SDK key.
+//
+// The SDK refuses to run a `test_` key in a build that isn't debuggable: it
+// shows a "Wrong API Key" dialog and closes the app. One key shared by both
+// build types therefore means whichever store you last developed against is the
+// one that ships — and a Test Store key inside an upload is an app that dies on
+// launch for every tester, discovered only after the upload.
+//
+// So debug may carry its own Test Store key, and release always takes the
+// production one.
+val revenueCatReleaseKey = secret("REVENUECAT_PUBLIC_SDK_KEY")
+val revenueCatDebugKey = secret("REVENUECAT_TEST_SDK_KEY").ifBlank { revenueCatReleaseKey }
+
+// A *blank* key stays fine — a fresh clone with no local.properties has to
+// build, and the app disables purchases when there is no key. A wrong-*store*
+// key is the one thing that must never ship, so that alone fails the build, and
+// only when a release build is what was actually asked for. Debug builds and
+// Android Studio's project sync are untouched.
+val releaseBuildRequested = gradle.startParameter.taskNames.any {
+    it.contains("release", ignoreCase = true)
+}
+if (releaseBuildRequested && revenueCatReleaseKey.startsWith("test_")) {
+    error(
+        "REVENUECAT_PUBLIC_SDK_KEY in local.properties is a RevenueCat Test " +
+            "Store key (test_…). Shipped, the SDK closes the app on launch with " +
+            "a \"Wrong API Key\" dialog. Set it to the Google Play key (goog_…) " +
+            "from RevenueCat > Project settings > API keys, and move the test " +
+            "key to REVENUECAT_TEST_SDK_KEY to keep using it in debug builds."
+    )
 }
 
 // Every Play upload needs a versionCode higher than the last one that reached
@@ -84,7 +118,9 @@ android {
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
-        buildConfigField("String", "REVENUECAT_PUBLIC_SDK_KEY", secretLiteral("REVENUECAT_PUBLIC_SDK_KEY"))
+        // Overridden per build type below; this is the fallback for any build
+        // type that doesn't set one.
+        buildConfigField("String", "REVENUECAT_PUBLIC_SDK_KEY", quoteLiteral(revenueCatReleaseKey))
         buildConfigField("String", "APP_API_KEY", secretLiteral("APP_API_KEY"))
     }
 
@@ -103,7 +139,23 @@ android {
     }
 
     buildTypes {
+        debug {
+            // Sandbox purchases with no Play account, when a test key is set.
+            buildConfigField(
+                "String",
+                "REVENUECAT_PUBLIC_SDK_KEY",
+                quoteLiteral(revenueCatDebugKey)
+            )
+        }
+
         release {
+            // Always the production key — guarded above, so a `test_` value
+            // fails the build rather than reaching a tester's phone.
+            buildConfigField(
+                "String",
+                "REVENUECAT_PUBLIC_SDK_KEY",
+                quoteLiteral(revenueCatReleaseKey)
+            )
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(

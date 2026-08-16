@@ -172,6 +172,21 @@ class OnboardingProfileRequest(BaseModel):
     flirt_level: Optional[str] = Field(default=None, max_length=32)
 
 
+class ContentReportRequest(BaseModel):
+    """A user flagging something the model wrote.
+
+    Google's Generative AI policy requires an in-app way to report offensive
+    output, so this route is a release requirement rather than a nice-to-have.
+
+    Only the flagged suggestion travels — never the screenshot, and never the
+    conversation context. A report is about one thing the model said, and
+    shipping the surrounding chat to answer that question would collect far
+    more than the report needs.
+    """
+    text: str = Field(max_length=2000)
+    reason: Optional[str] = Field(default=None, max_length=64)
+
+
 class MeResponse(BaseModel):
     app_user_id: str
     is_pro: bool
@@ -367,6 +382,33 @@ async def save_onboarding(
         await store.save_onboarding_profile(app_user_id, profile.model_dump())
     except Exception as e:
         print(f"[ERR] could not save onboarding profile for {app_user_id}: {e}")
+    return None
+
+
+@app.post("/report", status_code=204)
+async def report_content(
+    report: ContentReportRequest,
+    app_user_id: str = Depends(authenticate),
+):
+    """Record a user's report of something the model generated.
+
+    Deliberately not metered and not gated on Pro: making it harder to report
+    offensive output than to generate it would be the wrong way round, and
+    Google's Generative AI policy expects the mechanism to be available to
+    everyone using the app.
+
+    Reports land in the server log under a single greppable prefix. That is
+    enough to satisfy the policy and to actually read them at current volume;
+    if reports become frequent enough to need triage, give them a table.
+
+    Never fails the caller. Someone reporting offensive content has already had
+    a bad experience, and an error on top of it — for something they cannot
+    retry usefully — would only add to it.
+    """
+    reason = report.reason or "unspecified"
+    # Newlines would let one report forge extra log lines.
+    text = report.text.replace("\n", " ").replace("\r", " ").strip()
+    print(f"[REPORT] user={app_user_id} reason={reason} text={text!r}")
     return None
 
 

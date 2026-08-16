@@ -30,6 +30,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -77,6 +78,8 @@ fun KeyboardPanel(
     isDarkTheme: Boolean,
     onGenerate: () -> Unit,
     onSuggestionClick: (String) -> Unit,
+    /** Long-press a suggestion, confirm, and it lands here. */
+    onReportSuggestion: (String) -> Unit,
     onNewChatClick: () -> Unit,
     onSettingsClick: () -> Unit,
     onBackspaceClick: () -> Unit,
@@ -152,6 +155,7 @@ fun KeyboardPanel(
                         errorMessage = errorMessage,
                         isDarkTheme = isDarkTheme,
                         onSuggestionClick = onSuggestionClick,
+                        onReportSuggestion = onReportSuggestion,
                         // Lets the newest reply settle clear of the controls
                         // while older ones keep scrolling up through the fade.
                         bottomInset = controlsHeight
@@ -298,6 +302,75 @@ private fun ScreenshotCard(
 }
 
 /**
+ * The confirm step between long-pressing a suggestion and filing a report.
+ *
+ * There is a step at all because a long-press is easy to trigger by accident
+ * while reaching for a bubble, and a report that fires on the press itself
+ * would be invisible to the person who caused it.
+ */
+@Composable
+private fun ReportConfirmStrip(
+    onConfirm: () -> Unit,
+    onCancel: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .widthIn(max = 260.dp)
+            .clip(RoundedCornerShape(20.dp))
+            .background(MaterialTheme.colorScheme.surfaceVariant)
+            .padding(start = 14.dp, end = 4.dp, top = 2.dp, bottom = 2.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            text = "Report this reply?",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Spacer(modifier = Modifier.width(6.dp))
+        Text(
+            text = "Report",
+            modifier = Modifier
+                .clip(RoundedCornerShape(10.dp))
+                .clickable(onClick = onConfirm)
+                .padding(horizontal = 10.dp, vertical = 8.dp),
+            style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.error,
+            fontWeight = FontWeight.Medium
+        )
+        Text(
+            text = "Cancel",
+            modifier = Modifier
+                .clip(RoundedCornerShape(10.dp))
+                .clickable(onClick = onCancel)
+                .padding(horizontal = 10.dp, vertical = 8.dp),
+            style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
+}
+
+/**
+ * What a reported suggestion turns into.
+ *
+ * The reply itself is replaced rather than struck through: the user just told
+ * us it was offensive, so leaving it on screen — still tappable — would be a
+ * strange thing to do next.
+ */
+@Composable
+private fun ReportAcknowledgement() {
+    Text(
+        text = "Reported. Thanks — we'll take a look.",
+        modifier = Modifier
+            .widthIn(max = 240.dp)
+            .clip(RoundedCornerShape(20.dp))
+            .background(MaterialTheme.colorScheme.surfaceVariant)
+            .padding(horizontal = 14.dp, vertical = 10.dp),
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant
+    )
+}
+
+/**
  * One vertical chat rendered from the ordered session transcript: screenshots on
  * the left, sent replies and tappable suggestions on the right, and the typing
  * bubble while replies are being written. Multiple screenshots interleave with
@@ -310,10 +383,18 @@ private fun ChatTranscript(
     errorMessage: String?,
     isDarkTheme: Boolean,
     onSuggestionClick: (String) -> Unit,
+    onReportSuggestion: (String) -> Unit,
     bottomInset: Dp = 0.dp
 ) {
     val listState = rememberLazyListState()
     val showError = state == RizzSession.Status.ERROR && errorMessage != null
+
+    // Which suggestion is asking "report this?" right now, and which have
+    // already been reported. Local to the transcript because neither outlives
+    // the panel: a report is filed and done, and the acknowledgement only has
+    // to survive until the conversation moves on.
+    var pendingReport by remember { mutableStateOf<String?>(null) }
+    val reportedTexts = remember { mutableStateListOf<String>() }
 
     LaunchedEffect(transcript.size, showError) {
         val count = transcript.size + if (showError) 1 else 0
@@ -363,11 +444,29 @@ private fun ChatTranscript(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.End
                 ) {
-                    PebbleBubble(
-                        text = item.text,
-                        onClick = { onSuggestionClick(item.text) },
-                        modifier = Modifier.widthIn(max = 240.dp)
-                    )
+                    when {
+                        item.text in reportedTexts -> ReportAcknowledgement()
+
+                        item.text == pendingReport -> ReportConfirmStrip(
+                            onConfirm = {
+                                pendingReport = null
+                                reportedTexts.add(item.text)
+                                onReportSuggestion(item.text)
+                            },
+                            onCancel = { pendingReport = null }
+                        )
+
+                        else -> PebbleBubble(
+                            text = item.text,
+                            onClick = { onSuggestionClick(item.text) },
+                            // Long-press rather than a visible button on every
+                            // bubble: reporting is rare, and a permanent affordance
+                            // next to each suggestion would crowd a 300dp panel and
+                            // sit in the way of the tap that actually matters.
+                            onLongClick = { pendingReport = item.text },
+                            modifier = Modifier.widthIn(max = 240.dp)
+                        )
+                    }
                 }
 
                 TranscriptItem.Typing -> Row(

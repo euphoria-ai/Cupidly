@@ -9,9 +9,11 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
@@ -133,6 +135,10 @@ private fun pebbleColors(tone: PebbleTone): PebbleColors {
  * and press spring; callers supply the content.
  */
 @Composable
+// combinedClickable is still marked experimental in this Compose version. It is
+// the only way to get a long-press without hand-rolling gesture detection, and
+// its signature has been stable for years.
+@OptIn(ExperimentalFoundationApi::class)
 fun PebbleSurface(
     onClick: (() -> Unit)?,
     modifier: Modifier = Modifier,
@@ -140,6 +146,7 @@ fun PebbleSurface(
     cornerRadius: Dp = 22.dp,
     elevation: Dp = 6.dp,
     contentAlignment: Alignment = Alignment.Center,
+    onLongClick: (() -> Unit)? = null,
     content: @Composable BoxScope.() -> Unit
 ) {
     val interactionSource = remember { MutableInteractionSource() }
@@ -185,11 +192,12 @@ fun PebbleSurface(
             )
             .border(width = 1.dp, color = colors.rim, shape = shape)
             .then(
-                if (onClick != null) {
-                    Modifier.clickable(
+                if (onClick != null || onLongClick != null) {
+                    Modifier.combinedClickable(
                         interactionSource = interactionSource,
                         indication = null,
-                        onClick = onClick
+                        onLongClick = onLongClick,
+                        onClick = onClick ?: {}
                     )
                 } else {
                     Modifier
@@ -322,7 +330,8 @@ fun PebbleIconButton(
 fun PebbleBubble(
     text: String,
     onClick: (() -> Unit)?,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    onLongClick: (() -> Unit)? = null
 ) {
     PebbleSurface(
         onClick = onClick,
@@ -330,7 +339,8 @@ fun PebbleBubble(
         tone = PebbleTone.BLUE,
         cornerRadius = 20.dp,
         elevation = 5.dp,
-        contentAlignment = Alignment.CenterStart
+        contentAlignment = Alignment.CenterStart,
+        onLongClick = onLongClick
     ) {
         Text(
             text = text,
