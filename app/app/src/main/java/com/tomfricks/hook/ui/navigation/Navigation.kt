@@ -8,6 +8,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.navigation.compose.NavHost
@@ -54,8 +57,16 @@ fun HookNavigation(paywallRequest: Int = 0) {
         initial = null
     )
     val isPro by BillingManager.isPro.collectAsState()
+    val entitlementSettled by BillingManager.entitlementSettled.collectAsState()
 
     val navController = rememberNavController()
+
+    // Set when onboarding finishes, cleared once the paywall decision is made.
+    // The decision is deferred rather than taken inline because on a reinstall
+    // the entitlement comes back from Google Play a moment after launch, and
+    // showing a paywall to someone who is already paying is the worst version
+    // of this screen.
+    var paywallAfterOnboarding by rememberSaveable { mutableStateOf(false) }
 
     val preferences = userPreferences
     if (preferences == null) {
@@ -83,6 +94,17 @@ fun HookNavigation(paywallRequest: Int = 0) {
         }
     }
 
+    LaunchedEffect(paywallAfterOnboarding, entitlementSettled, isPro) {
+        if (!paywallAfterOnboarding) return@LaunchedEffect
+        // isPro landing early is an answer in itself; otherwise wait for the
+        // launch-time resolution to have asked everyone, Play included.
+        if (!isPro && !entitlementSettled) return@LaunchedEffect
+        paywallAfterOnboarding = false
+        if (!isPro) {
+            navController.navigate(Screen.Paywall.route)
+        }
+    }
+
     NavHost(
         navController = navController,
         startDestination = startDestination
@@ -105,9 +127,7 @@ fun HookNavigation(paywallRequest: Int = 0) {
                     // allowed to pick. Ask for the upgrade here, while that's
                     // still fresh — and push it on top of Home, so closing it
                     // lands them in the app rather than back in onboarding.
-                    if (!isPro) {
-                        navController.navigate(Screen.Paywall.route)
-                    }
+                    paywallAfterOnboarding = true
                 },
                 // Back out of the first question and you're on the last pitch
                 // slide again, which is where you came from.
