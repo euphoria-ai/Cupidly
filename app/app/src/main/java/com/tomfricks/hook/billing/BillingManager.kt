@@ -31,6 +31,8 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
+import java.util.concurrent.atomic.AtomicBoolean
 
 /** What came back from a purchase or a restore, in terms the UI cares about. */
 sealed interface PurchaseResult {
@@ -110,9 +112,22 @@ object BillingManager {
     private const val ENTITLEMENT_RECHECK_ATTEMPTS = 3
     private const val ENTITLEMENT_RECHECK_DELAY_MS = 800L
 
+    /**
+     * Upper bound on the launch-time entitlement resolution, after which
+     * [entitlementSettled] flips regardless.
+     *
+     * It only bounds the *waiting*, not the work: a restore still running when
+     * this expires keeps going and lands through the customer info listener.
+     * The bound exists so a stalled network can never leave a caller that
+     * defers to [entitlementSettled] waiting forever.
+     */
+    private const val INITIAL_ENTITLEMENT_TIMEOUT_MS = 10_000L
+
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
     private var preferencesRepository: PreferencesRepository? = null
+
+    private val initialResolutionStarted = AtomicBoolean(false)
 
     /**
      * Application context only — never an Activity. Used to reach the server's
@@ -129,6 +144,20 @@ object BillingManager {
 
     /** The current offering and how the last fetch went. */
     val offeringsState: StateFlow<OfferingsState> = _offeringsState.asStateFlow()
+
+    private val _entitlementSettled = MutableStateFlow(false)
+
+    /**
+     * False until launch has finished asking every source that could know about
+     * a subscription — the persisted cache, RevenueCat, and (once per install)
+     * Google Play. True afterwards, including when all of them failed.
+     *
+     * Anything that would *show* a paywall on its own initiative should wait
+     * for this. [isPro] being false before it flips only means "we haven't
+     * finished asking", and on a reinstall the answer arrives from Play a
+     * second or two after launch.
+     */
+    val entitlementSettled: StateFlow<Boolean> = _entitlementSettled.asStateFlow()
 
     private val _isAvailable = MutableStateFlow(false)
 
@@ -169,26 +198,23 @@ object BillingManager {
         preferencesRepository = repository
         appContext = context.applicationContext
 
-        // Paint from the persisted answer first so Pro users never flash a
-        // paywall while the network catches up.
-        scope.launch {
-            val cached = runCatching { repository.entitlementFlow.first().isPro }.getOrNull()
-            if (cached == true) {
-                _isPro.value = true
-            }
-        }
-
         val apiKey = BuildConfig.REVENUECAT_PUBLIC_SDK_KEY
         if (apiKey.isBlank()) {
             Log.w(
                 TAG,
                 "No REVENUECAT_PUBLIC_SDK_KEY in local.properties — purchases are disabled"
             )
+            // The cache is the whole answer here — the steps that need the SDK
+            // bow out on their own.
+            startInitialResolution(repository)
             return
         }
 
         if (Purchases.isConfigured) {
             _isAvailable.value = true
+            // Whoever configured the SDK already started the resolution; the
+            // guard inside startInitialResolution keeps this from repeating it.
+            startInitialResolution(repository)
             return
         }
 
@@ -207,7 +233,89 @@ object BillingManager {
         // Application.onCreate, and RevenueCat pre-fetches the offerings cache
         // on its own; asking here just adds a network request at launch for a
         // paywall the user may never open. PaywallScreen fetches on entry.
-        scope.launch { refreshCustomerInfo() }
+        startInitialResolution(repository)
+    }
+
+    /** Runs [resolveInitialEntitlement] exactly once per process. */
+    private fun startInitialResolution(repository: PreferencesRepository) {
+        if (!initialResolutionStarted.compareAndSet(false, true)) return
+        scope.launch { resolveInitialEntitlement(repository) }
+    }
+
+    /**
+     * Work out, once per launch, whether this install is entitled — ending with
+     * the question only Google Play can answer.
+     *
+     * The order matters and each step earns its place:
+     *
+     *  1. the persisted answer, so a Pro user never flashes a paywall while the
+     *     network catches up;
+     *  2. RevenueCat, which knows about this install id — enough for every
+     *     launch after the first;
+     *  3. Google Play, but only on an install that has never asked. This is the
+     *     step that makes a reinstall work. The install id is minted fresh on
+     *     first launch, so RevenueCat has never seen this subscriber and step 2
+     *     truthfully answers "not Pro"; Play is the only party that still
+     *     remembers the account bought a subscription, and a restore is how we
+     *     ask it. Without this, a paying user who reinstalls is shown a paywall
+     *     until they happen to find "Restore purchases".
+     */
+    private suspend fun resolveInitialEntitlement(repository: PreferencesRepository) {
+        try {
+            withTimeoutOrNull(INITIAL_ENTITLEMENT_TIMEOUT_MS) {
+                applyCachedEntitlement(repository)
+                refreshCustomerInfo()
+                syncPlayPurchasesOnce(repository)
+            }
+        } finally {
+            // In a finally so a cancelled scope or an unforeseen throw can't
+            // strand a caller that is waiting on this.
+            _entitlementSettled.value = true
+        }
+    }
+
+    /** Paint the last answer the server or RevenueCat gave us, before asking anyone. */
+    private suspend fun applyCachedEntitlement(repository: PreferencesRepository) {
+        val cached = runCatching { repository.entitlementFlow.first().isPro }.getOrNull()
+        if (cached == true) {
+            _isPro.value = true
+        }
+    }
+
+    /**
+     * Ask Play — through RevenueCat's restore — whether the account signed in on
+     * this device already owns Hook Pro, at most once per install.
+     *
+     * Silent by design: this is not the user's "Restore purchases" tap, so it
+     * publishes no [BillingOutcome] and shows no dialog. Finding nothing is the
+     * expected result for the majority of installs, not an error.
+     *
+     * Marked as done whenever the lookup *completes*, purchase or not, so a
+     * free user pays for it once. A failure leaves the flag unset and the next
+     * launch tries again, which is what covers "reinstalled on a plane".
+     */
+    private suspend fun syncPlayPurchasesOnce(repository: PreferencesRepository) {
+        if (!Purchases.isConfigured) return
+
+        // A subscriber RevenueCat already knows is entitled needs nothing from
+        // Play, and asking anyway risks transferring the entitlement around.
+        if (_isPro.value) return
+
+        val alreadySynced = runCatching { repository.hasSyncedPlayPurchases() }.getOrDefault(true)
+        if (alreadySynced) return
+
+        try {
+            onCustomerInfo(Purchases.sharedInstance.awaitRestore())
+            Log.d(TAG, "Play purchase sync finished; isPro=${_isPro.value}")
+        } catch (e: PurchasesException) {
+            // Never surfaced: the user did not ask for this, and a free user
+            // seeing "no subscription found" at launch would be nonsense.
+            Log.d(TAG, "Play purchase sync did not complete, will retry: ${e.message}")
+            return
+        }
+
+        runCatching { repository.markPlayPurchasesSynced() }
+            .onFailure { Log.w(TAG, "Could not record the Play purchase sync", it) }
     }
 
     /** Fire-and-forget refresh for callers that aren't in a coroutine (Activity.onResume). */

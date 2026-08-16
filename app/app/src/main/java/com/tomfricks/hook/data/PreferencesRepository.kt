@@ -9,6 +9,7 @@ import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import java.util.UUID
 
@@ -67,6 +68,7 @@ class PreferencesRepository(private val context: Context) {
         val ONBOARDING_CHECKPOINT = stringPreferencesKey("onboarding_checkpoint")
         val ONBOARDING_SYNCED = booleanPreferencesKey("onboarding_synced")
         val APP_USER_ID = stringPreferencesKey("app_user_id")
+        val PLAY_PURCHASES_SYNCED = booleanPreferencesKey("play_purchases_synced")
         val IS_PRO = booleanPreferencesKey("is_pro")
         val FREE_USED = intPreferencesKey("free_used")
         val FREE_LIMIT = intPreferencesKey("free_limit")
@@ -158,6 +160,28 @@ class PreferencesRepository(private val context: Context) {
         val id = updated[PreferencesKeys.APP_USER_ID] ?: UUID.randomUUID().toString()
         cachedAppUserId = id
         return id
+    }
+
+    /**
+     * True once this install has asked Google Play whether the signed-in Play
+     * account already owns a subscription.
+     *
+     * The install id above is minted fresh on every install, so RevenueCat has
+     * never heard of a reinstall — only Play still knows the account paid. That
+     * question is asked once per install rather than on every launch: each ask
+     * can move the entitlement from whatever install currently holds it (the
+     * RevenueCat default), so repeating it would let two installs of the same
+     * Play account tug Pro back and forth. "Restore purchases" stays available
+     * for the second device, and for anyone this one-shot missed.
+     */
+    suspend fun hasSyncedPlayPurchases(): Boolean =
+        context.dataStore.data.first()[PreferencesKeys.PLAY_PURCHASES_SYNCED] ?: false
+
+    /** Records a *completed* Play lookup, whether or not it found a purchase. */
+    suspend fun markPlayPurchasesSynced() {
+        context.dataStore.edit { preferences ->
+            preferences[PreferencesKeys.PLAY_PURCHASES_SYNCED] = true
+        }
     }
 
     suspend fun updateEntitlement(state: EntitlementState) {
@@ -318,6 +342,7 @@ class PreferencesRepository(private val context: Context) {
             // allowance keyed to it deliberately survive: rotating them would
             // hand the user a fresh batch of free generations.
             val appUserId = preferences[PreferencesKeys.APP_USER_ID]
+            val playSynced = preferences[PreferencesKeys.PLAY_PURCHASES_SYNCED]
             val isPro = preferences[PreferencesKeys.IS_PRO]
             val freeUsed = preferences[PreferencesKeys.FREE_USED]
             val freeLimit = preferences[PreferencesKeys.FREE_LIMIT]
@@ -325,6 +350,7 @@ class PreferencesRepository(private val context: Context) {
             preferences.clear()
 
             if (appUserId != null) preferences[PreferencesKeys.APP_USER_ID] = appUserId
+            if (playSynced != null) preferences[PreferencesKeys.PLAY_PURCHASES_SYNCED] = playSynced
             if (isPro != null) preferences[PreferencesKeys.IS_PRO] = isPro
             if (freeUsed != null) preferences[PreferencesKeys.FREE_USED] = freeUsed
             if (freeLimit != null) preferences[PreferencesKeys.FREE_LIMIT] = freeLimit
