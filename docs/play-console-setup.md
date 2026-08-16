@@ -97,13 +97,15 @@ applicationId = "com.tom7.hook"
 
 in [`app/app/build.gradle.kts`](../app/app/build.gradle.kts).
 
-**⚠️ Check this before you go any further.** The marketing site currently links
-to `https://play.google.com/store/apps/details?id=app.hook`
-([`web/app/site.ts`](../web/app/site.ts)) — a *different* package name. One of
-the two is wrong. If `com.tom7.hook` isn't the name you want on the store
-forever, change `applicationId` now and create a fresh app entry; you have
-already uploaded to internal testing under `com.tom7.hook`, so that app entry is
-locked to it. After public release, the decision is final.
+The marketing site's Play Store link in [`web/app/site.ts`](../web/app/site.ts)
+now points at this same package. It used to say `app.hook`, which was a dead
+link — the build is the source of truth, because Play binds the package name to
+the app entry and the console can't be changed.
+
+**If `com.tom7.hook` is not the name you want on the store forever, change it
+now.** Internal testing has already bound that console entry to it, so a
+different name means creating a fresh app entry — and updating `applicationId`
+and `site.ts` together. After public release the decision is final.
 
 ---
 
@@ -336,20 +338,28 @@ keyboard**. Answer honestly:
 - Keyboards get extra scrutiny here. An inaccurate data safety form is a policy
   violation, not a paperwork slip, and is a common cause of suspension.
 
-### Generative AI — ⚠️ currently unmet
+### Generative AI
 
 Hook generates content with an LLM, so Google's **Generative AI policy** applies.
 Its core requirement is an **in-app mechanism for users to report offensive
 content** produced by the AI.
 
-**Hook does not have one today.** There is no report or flag affordance anywhere
-in the app — not on a generated reply, not in Settings. This is a code change,
-not a form field, and it is a plausible rejection reason for an app whose entire
-purpose is generating flirtatious messages.
+Hook has one: **long-press any generated reply in the keyboard → Report →
+confirm.** The reply is replaced by an acknowledgement and the flagged text is
+sent to the server. Only that one reply travels — never the screenshot, never
+the surrounding conversation.
 
-The smallest thing that satisfies it: a long-press or overflow action on a
-generated reply that sends the offending text somewhere you can read it, plus a
-confirmation to the user. Build it before submitting for production review.
+Reports arrive in the server log, one line each, prefixed `[REPORT]`:
+
+```
+[REPORT] user=<install id> reason=offensive text='the flagged reply'
+```
+
+Grep your deployment's logs for `[REPORT]`. At current volume that's enough; if
+reports become frequent enough to need triage, give them a table.
+
+When the declaration asks how users report AI content, describe the long-press
+flow above.
 
 ### Photo and video permissions
 Hook declares `READ_MEDIA_IMAGES` for screenshot detection. Broad photo access
@@ -537,8 +547,8 @@ Things this setup deliberately doesn't do, so nobody discovers them by surprise:
   either real accounts or device-level identification.
 - **Reviewer promo codes expire.** There is no non-expiring credential for a
   no-login paid app. This needs manual attention at each submission.
-- **No in-app content reporting.** Required by Google's Generative AI policy and
-  not yet built. See §8.
+- **Content reports go to the log, not a table.** Fine at low volume, and it
+  means reports are subject to whatever log retention your host gives you.
 
 ## Launch blockers, in order
 
@@ -547,7 +557,8 @@ The things that will stop a production release, longest lead time first:
 1. **D-U-N-S number**, if publishing as an organisation — up to 30 business days.
 2. **12 testers for 14 continuous days** in a closed test, for personal accounts
    created after 13 Nov 2023.
-3. **In-app content reporting** for the Generative AI policy — not built.
-4. **Package name decision** — `com.tom7.hook` vs the `app.hook` the website
-   links to. Permanent once public.
-5. **Service account propagation** — up to 36 hours, one time.
+3. **Confirm the package name** — `com.tom7.hook` is permanent once public.
+4. **Service account propagation** — up to 36 hours, one time.
+
+In-app content reporting for the Generative AI policy was previously on this
+list. It is built — see §8.

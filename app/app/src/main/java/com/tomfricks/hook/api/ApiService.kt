@@ -46,6 +46,11 @@ interface HookApiInterface {
     // it landed.
     @POST("/onboarding")
     suspend fun submitOnboarding(@Body request: OnboardingProfileRequest): Response<Unit>
+
+    // Also 204. Reporting offensive output is a policy requirement, so it is
+    // never gated on Pro and never metered.
+    @POST("/report")
+    suspend fun reportContent(@Body request: ContentReportRequest): Response<Unit>
 }
 
 /** Suggestions, the updated hidden conversation context, and what's left of the allowance. */
@@ -206,6 +211,29 @@ class ApiService(
             true
         } catch (e: Exception) {
             Log.w(TAG, "Could not send the onboarding profile; will retry", e)
+            false
+        }
+    }
+
+    /**
+     * Flag one generated reply as offensive.
+     *
+     * Reports whether it landed so the keyboard can say "couldn't send that"
+     * rather than silently swallowing a report the user believes they filed.
+     */
+    suspend fun reportContent(
+        text: String,
+        reason: String? = null
+    ): Boolean = withContext(Dispatchers.IO) {
+        try {
+            val response = api.reportContent(ContentReportRequest(text = text, reason = reason))
+            if (!response.isSuccessful) {
+                logHttpError(response.code(), "POST /report")
+                return@withContext false
+            }
+            true
+        } catch (e: Exception) {
+            Log.w(TAG, "Could not send the content report", e)
             false
         }
     }

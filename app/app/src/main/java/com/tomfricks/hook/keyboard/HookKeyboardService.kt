@@ -127,6 +127,7 @@ class HookKeyboardService : InputMethodService(), LifecycleOwner {
                         isDarkTheme = isDarkTheme,
                         onGenerate = ::onGenerateClicked,
                         onSuggestionClick = ::onSuggestionClicked,
+                        onReportSuggestion = ::onSuggestionReported,
                         onNewChatClick = ::onNewChatClicked,
                         onSettingsClick = ::openSettings,
                         onBackspaceClick = ::onBackspaceClicked,
@@ -254,6 +255,21 @@ class HookKeyboardService : InputMethodService(), LifecycleOwner {
         // knows what was actually sent.
         RizzSession.markSent(suggestion)
         ConversationSession.recordSentReply(suggestion)
+    }
+
+    /**
+     * File a report against one generated reply.
+     *
+     * Fire-and-forget on the service scope, not the composition: the panel has
+     * already told the user the report is in, and an IME's composition can go
+     * away the moment they switch apps. Nothing here is worth interrupting them
+     * for — a report that fails to reach the server is logged and dropped
+     * rather than turned into an error over a keyboard.
+     */
+    private fun onSuggestionReported(suggestion: String) {
+        serviceScope.launch {
+            apiService?.reportContent(suggestion, reason = "offensive")
+        }
     }
 
     private fun openSettings() {

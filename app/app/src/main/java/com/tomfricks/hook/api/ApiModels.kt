@@ -81,6 +81,19 @@ data class OnboardingProfileRequest(
     val flirtLevel: String? = null
 )
 
+/**
+ * Body of `POST /report` — one generated reply a user flagged as offensive.
+ *
+ * Only the flagged text goes out. Not the screenshot it came from, and not the
+ * conversation context: a report is about a single thing the model said.
+ */
+data class ContentReportRequest(
+    @SerializedName("text")
+    val text: String,
+    @SerializedName("reason")
+    val reason: String? = null
+)
+
 /** Body of `GET /me` — entitlement + allowance for this install. */
 data class MeResponse(
     @SerializedName("app_user_id")

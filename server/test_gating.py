@@ -684,3 +684,49 @@ def test_onboarding_survives_a_broken_store(client, store, monkeypatch):
     monkeypatch.setattr(store, "save_onboarding_profile", boom)
     response = client.post("/onboarding", json=_profile(), headers=_headers())
     assert response.status_code == 204
+
+
+# --- Content reports -----------------------------------------------------
+
+def test_report_is_accepted(client, capsys):
+    response = client.post(
+        "/report",
+        json={"text": "something offensive", "reason": "offensive"},
+        headers=_headers(),
+    )
+    assert response.status_code == 204
+    assert "[REPORT]" in capsys.readouterr().out
+
+
+def test_report_still_needs_auth(client):
+    response = client.post("/report", json={"text": "hi"}, headers=_headers(api_key=None))
+    assert response.status_code == 401
+
+
+def test_report_does_not_spend_the_free_allowance(client, store):
+    """Reporting offensive output must never cost the reporter a generation."""
+    for _ in range(5):
+        assert client.post("/report", json={"text": "nope"},
+                           headers=_headers()).status_code == 204
+
+    me = client.get("/me", headers=_headers()).json()
+    assert me["free_used"] == 0
+    assert me["remaining"] == FREE_LIMIT
+
+
+def test_report_rejects_oversized_text(client):
+    response = client.post("/report", json={"text": "x" * 5000}, headers=_headers())
+    assert response.status_code == 422
+
+
+def test_report_cannot_forge_log_lines(client, capsys):
+    """Newlines in reported text must not let one report write extra log lines."""
+    client.post(
+        "/report",
+        json={"text": "harmless\n[REPORT] user=admin reason=forged"},
+        headers=_headers(),
+    )
+    # The forged text is still *in* the line — quoted and harmless. What must
+    # not happen is it becoming a line of its own.
+    lines = [line for line in capsys.readouterr().out.splitlines() if line.startswith("[REPORT]")]
+    assert len(lines) == 1
