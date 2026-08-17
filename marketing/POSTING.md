@@ -7,7 +7,7 @@ short, lowercase energy, no product-speak.
 Handle: `@hook`
 Tagline: `#1 AI Rizz Keyboard`
 Store: Google Play only. CTA is always **free to try**.
-Site: cupidly.app
+Site: [hook.tomlin7.com](https://hook.tomlin7.com)
 
 Renders are silent. Add a trending sound in the composer before you post.
 

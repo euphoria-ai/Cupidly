@@ -79,8 +79,8 @@ import kotlin.math.abs
 import kotlin.math.roundToInt
 import kotlin.math.roundToLong
 
-private const val TERMS_URL = "https://cupidly.app/terms"
-private const val PRIVACY_URL = "https://cupidly.app/privacy"
+private const val TERMS_URL = "https://hook.tomlin7.com/terms"
+private const val PRIVACY_URL = "https://hook.tomlin7.com/privacy"
 
 private val PRO_BENEFITS = listOf(
     "Unlimited text suggestions",
