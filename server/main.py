@@ -2,12 +2,16 @@ import os
 import json
 import hmac
 import re
-from typing import List, Literal, Optional
+import base64
+from typing import List, Literal, Optional, Tuple
 from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from openai import AsyncOpenAI, RateLimitError
+from google import genai
+from google.genai import types as gemini_types
+from google.genai.errors import ClientError as GeminiClientError
 import httpx
 from dotenv import load_dotenv
 import time
@@ -35,6 +39,36 @@ _client = AsyncOpenAI(
         timeout=httpx.Timeout(connect=3.0, read=20.0, write=10.0, pool=3.0),
     ),
 )
+
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.5-flash-lite")
+# Gemini's JSON schema dialect does not accept additionalProperties.
+GEMINI_RESPONSE_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "suggestion_1": {"type": "string"},
+        "suggestion_2": {"type": "string"},
+        "suggestion_3": {"type": "string"},
+        "updated_context_summary": {"type": "string"},
+    },
+    "required": [
+        "suggestion_1", "suggestion_2", "suggestion_3",
+        "updated_context_summary",
+    ],
+}
+
+_gemini = None
+if GEMINI_API_KEY:
+    _gemini = genai.Client(
+        api_key=GEMINI_API_KEY,
+        http_options=gemini_types.HttpOptions(
+            timeout=20_000,
+            retry_options=gemini_types.HttpRetryOptions(attempts=1),
+        ),
+    )
+    print(f"[INFO] Gemini fallback enabled ({GEMINI_MODEL})")
+else:
+    print("[INFO] GEMINI_API_KEY unset — Groq failures are returned to the client")
 
 app = FastAPI(
     title="Hook",
@@ -267,6 +301,72 @@ def strip_reasoning(text: str) -> str:
     return text.strip()
 
 
+def parse_suggestions(text: str) -> Tuple[List[str], str]:
+    """JSON text → (three suggestions, summary). Empty suggestions on failure."""
+    if not text:
+        return [], ""
+    try:
+        data = json.loads(strip_reasoning(text))
+    except (json.JSONDecodeError, TypeError, ValueError):
+        return [], ""
+    suggestions = [
+        data.get("suggestion_1", ""),
+        data.get("suggestion_2", ""),
+        data.get("suggestion_3", ""),
+    ]
+    raw_summary = data.get("updated_context_summary", "") or ""
+    summary = strip_reasoning(raw_summary) if raw_summary else ""
+    if len(suggestions) < 3 or not all(suggestions):
+        return [], ""
+    return suggestions, summary
+
+
+def usage_tokens(response) -> Tuple[Optional[int], Optional[int]]:
+    """Prompt/completion counts from Groq or Gemini usage objects."""
+    usage = getattr(response, "usage", None)
+    if usage is not None:
+        return (
+            getattr(usage, "prompt_tokens", None),
+            getattr(usage, "completion_tokens", None),
+        )
+    meta = getattr(response, "usage_metadata", None)
+    if meta is not None:
+        return (
+            getattr(meta, "prompt_token_count", None),
+            getattr(meta, "candidates_token_count", None),
+        )
+    return None, None
+
+
+async def gemini_complete(jpeg_bytes: bytes, prompt: str) -> str:
+    """One Gemini vision+JSON call. Raises GeminiClientError on API failure."""
+    if _gemini is None:
+        raise RuntimeError("Gemini client is not configured")
+    response = await _gemini.aio.models.generate_content(
+        model=GEMINI_MODEL,
+        contents=[
+            gemini_types.Part.from_bytes(data=jpeg_bytes, mime_type="image/jpeg"),
+            prompt,
+        ],
+        config=gemini_types.GenerateContentConfig(
+            response_mime_type="application/json",
+            response_schema=GEMINI_RESPONSE_SCHEMA,
+            max_output_tokens=600,
+            temperature=0.7,
+            automatic_function_calling=gemini_types.AutomaticFunctionCallingConfig(
+                disable=True
+            ),
+            thinking_config=gemini_types.ThinkingConfig(
+                thinking_level=gemini_types.ThinkingLevel.MINIMAL
+            ),
+        ),
+    )
+    prompt_tok, completion_tok = usage_tokens(response)
+    print(f"[PERF] {GEMINI_MODEL}: prompt={prompt_tok} "
+          f"completion={completion_tok}")
+    return response.text or ""
+
+
 def retry_after_seconds(err: Exception, default: int = 30) -> int:
     """Seconds to wait after a Groq 429, from the header or the message text."""
     header = getattr(getattr(err, "response", None), "headers", None)
@@ -458,6 +558,7 @@ async def generate_replies(
         suggestions = []
         updated_summary = ""
         last_error = None
+        groq_rate_limited = None
 
         # (model, response_format) attempts. json_schema is strict but only some
         # Groq models accept it; json_object is the universal fallback.
@@ -485,41 +586,63 @@ async def generate_replies(
                 groq_time = time.time() - groq_start
 
                 text = response.choices[0].message.content
-                candidate_summary = ""
-                if text:
-                    data = json.loads(strip_reasoning(text))
-                    suggestions = [
-                        data.get("suggestion_1", ""),
-                        data.get("suggestion_2", ""),
-                        data.get("suggestion_3", ""),
-                    ]
-                    # Present in the json_schema branch and, when the model
-                    # cooperates, in the json_object fallback too.
-                    raw_summary = data.get("updated_context_summary", "")
-                    candidate_summary = strip_reasoning(raw_summary) if raw_summary else ""
+                suggestions, candidate_summary = parse_suggestions(text or "")
 
-                if suggestions and len(suggestions) >= 3 and all(suggestions):
+                if suggestions:
                     updated_summary = candidate_summary
+                    prompt_tok, completion_tok = usage_tokens(response)
                     total = time.time() - start_time
-                    print(f"[PERF] {model}: groq={groq_time:.2f}s total={total:.2f}s")
+                    print(f"[PERF] {model}: groq={groq_time:.2f}s total={total:.2f}s "
+                          f"prompt={prompt_tok} completion={completion_tok}")
                     break
-                else:
-                    suggestions = []
             except RateLimitError as e:
-                # Retrying only spends more of the very budget we just ran out
-                # of, so surface it straight away as a 429 the client can act on.
+                # Same Groq org, same budget — extra format attempts will 429
+                # too. Fail over to Gemini instead of waiting Retry-After.
+                groq_rate_limited = e
                 print(f"[ERR] {model}: rate limited: {e}")
-                raise HTTPException(
-                    status_code=429,
-                    detail="Rate limit reached. Try again in a moment.",
-                    headers={"Retry-After": str(retry_after_seconds(e))},
-                )
+                break
             except Exception as e:
                 print(f"[ERR] {model}: {e}")
                 last_error = e
                 continue
 
+        if (not suggestions or len(suggestions) < 3) and _gemini is not None:
+            try:
+                jpeg_bytes = base64.b64decode(b64)
+                gemini_start = time.time()
+                text = await gemini_complete(jpeg_bytes, prompt)
+                suggestions, candidate_summary = parse_suggestions(text)
+                gemini_time = time.time() - gemini_start
+                if suggestions:
+                    updated_summary = candidate_summary
+                    total = time.time() - start_time
+                    reason = "groq 429" if groq_rate_limited else "groq failed"
+                    print(f"[PERF] {GEMINI_MODEL}: gemini={gemini_time:.2f}s "
+                          f"total={total:.2f}s ({reason} fallback)")
+                else:
+                    print(f"[ERR] {GEMINI_MODEL}: returned nothing valid")
+            except GeminiClientError as e:
+                print(f"[ERR] {GEMINI_MODEL}: {e}")
+                last_error = e
+                if getattr(e, "code", None) == 429:
+                    raise HTTPException(
+                        status_code=429,
+                        detail="Rate limit reached. Try again in a moment.",
+                        headers={"Retry-After": str(retry_after_seconds(e))},
+                    )
+            except Exception as e:
+                print(f"[ERR] {GEMINI_MODEL}: {e}")
+                last_error = e
+
         if not suggestions or len(suggestions) < 3:
+            if groq_rate_limited:
+                print(f"[ERR] Groq rate limited and Gemini did not recover: "
+                      f"{last_error if last_error else groq_rate_limited}")
+                raise HTTPException(
+                    status_code=429,
+                    detail="Rate limit reached. Try again in a moment.",
+                    headers={"Retry-After": str(retry_after_seconds(groq_rate_limited))},
+                )
             # The provider's own words (model ids, quota wording, stack detail)
             # stay in our logs: the client turns any 5xx into its own copy, and
             # echoing upstream text back has only ever leaked internals.

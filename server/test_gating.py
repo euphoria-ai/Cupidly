@@ -23,6 +23,7 @@ os.environ["ALLOWANCE_DB_PATH"] = os.path.join(
 os.environ.pop("SUPABASE_URL", None)
 os.environ.pop("SUPABASE_SERVICE_ROLE_KEY", None)
 os.environ.pop("ALLOWED_ORIGINS", None)
+os.environ.pop("GEMINI_API_KEY", None)
 
 from fastapi.testclient import TestClient  # noqa: E402
 

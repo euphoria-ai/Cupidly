@@ -20,6 +20,7 @@ os.environ["ALLOWANCE_DB_PATH"] = os.path.join(
 os.environ.pop("SUPABASE_URL", None)
 os.environ.pop("SUPABASE_SERVICE_ROLE_KEY", None)
 os.environ.pop("ALLOWED_ORIGINS", None)
+os.environ.pop("GEMINI_API_KEY", None)
 
 from fastapi.testclient import TestClient  # noqa: E402
 
@@ -220,6 +221,93 @@ def test_groq_rate_limit_returns_429_with_retry_after(client, monkeypatch):
     assert "Rate limit" in result.json()["detail"]
     # Failed before any replies were delivered — do not spend allowance.
     assert client.get("/me", headers=_headers()).json()["free_used"] == 0
+
+
+def test_groq_rate_limit_falls_back_to_gemini(client, monkeypatch):
+    _mock_is_pro(monkeypatch, False)
+    request = httpx.Request("POST", "https://api.groq.com/openai/v1/chat/completions")
+    response = httpx.Response(
+        429,
+        headers={"retry-after": "17"},
+        request=request,
+    )
+    err = RateLimitError(
+        "Please try again in 17s.",
+        response=response,
+        body={"error": {"message": "rate limited"}},
+    )
+    groq_calls = _mock_groq(monkeypatch, error=err)
+    gemini_calls = []
+
+    async def fake_gemini(jpeg_bytes, prompt):
+        gemini_calls.append({"jpeg_len": len(jpeg_bytes), "prompt": prompt})
+        return GOOD_PAYLOAD
+
+    monkeypatch.setattr(main, "_gemini", object())
+    monkeypatch.setattr(main, "gemini_complete", fake_gemini)
+
+    result = client.post("/generate-replies", json=_body(), headers=_headers())
+    assert result.status_code == 200
+    assert result.json()["suggestions"] == [
+        "bold of you to assume i'd say no",
+        "you had me at hello",
+        "prove it",
+    ]
+    assert len(groq_calls) == 1
+    assert len(gemini_calls) == 1
+    assert client.get("/me", headers=_headers()).json()["free_used"] == 1
+
+
+def test_groq_success_does_not_call_gemini(client, monkeypatch):
+    _mock_is_pro(monkeypatch, False)
+    _mock_groq(monkeypatch)
+    gemini_calls = []
+
+    async def fake_gemini(*args, **kwargs):
+        gemini_calls.append(True)
+        raise AssertionError("Gemini must not run when Groq succeeds")
+
+    monkeypatch.setattr(main, "_gemini", object())
+    monkeypatch.setattr(main, "gemini_complete", fake_gemini)
+
+    result = client.post("/generate-replies", json=_body(), headers=_headers())
+    assert result.status_code == 200
+    assert gemini_calls == []
+
+
+def _enable_gemini(monkeypatch, payload=GOOD_PAYLOAD):
+    calls = []
+
+    async def fake_gemini(jpeg_bytes, prompt):
+        calls.append({"jpeg_len": len(jpeg_bytes), "prompt": prompt})
+        return payload
+
+    monkeypatch.setattr(main, "_gemini", object())
+    monkeypatch.setattr(main, "gemini_complete", fake_gemini)
+    return calls
+
+
+def test_groq_error_falls_back_to_gemini(client, monkeypatch):
+    _mock_is_pro(monkeypatch, False)
+    groq_calls = _mock_groq(monkeypatch, error=RuntimeError("groq exploded"))
+    gemini_calls = _enable_gemini(monkeypatch)
+
+    result = client.post("/generate-replies", json=_body(), headers=_headers())
+    assert result.status_code == 200
+    assert len(result.json()["suggestions"]) == 3
+    assert groq_calls
+    assert len(gemini_calls) == 1
+    assert client.get("/me", headers=_headers()).json()["free_used"] == 1
+
+
+def test_groq_garbage_falls_back_to_gemini(client, monkeypatch):
+    _mock_is_pro(monkeypatch, False)
+    _mock_groq(monkeypatch, content="not json at all")
+    gemini_calls = _enable_gemini(monkeypatch)
+
+    result = client.post("/generate-replies", json=_body(), headers=_headers())
+    assert result.status_code == 200
+    assert len(gemini_calls) == 1
 
 
 # --- Allowance increment resilience --------------------------------------

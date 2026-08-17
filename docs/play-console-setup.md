@@ -291,6 +291,7 @@ REVENUECAT_SECRET_KEY=sk_your_secret_key      # from RevenueCat, server-only
 REVENUECAT_ENTITLEMENT_ID=Hook Pro            # must match the dashboard
 APP_API_KEY=the-same-value-as-in-local.properties
 GROQ_API_KEY=...
+GEMINI_API_KEY=...                      # optional; used when Groq fails
 FREE_GENERATION_LIMIT=5                       # optional, defaults to 5
 ```
 
