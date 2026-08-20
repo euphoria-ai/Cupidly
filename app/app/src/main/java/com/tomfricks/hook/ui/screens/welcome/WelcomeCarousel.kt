@@ -1,8 +1,6 @@
 package com.tomfricks.hook.ui.screens.welcome
 
-import android.view.ViewGroup
 import androidx.annotation.DrawableRes
-import androidx.annotation.OptIn
 import androidx.annotation.RawRes
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
@@ -28,32 +26,19 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.viewinterop.AndroidView
-import androidx.core.net.toUri
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.LifecycleEventObserver
-import androidx.media3.common.MediaItem
-import androidx.media3.common.Player
-import androidx.media3.common.util.UnstableApi
-import androidx.media3.exoplayer.ExoPlayer
-import androidx.media3.ui.AspectRatioFrameLayout
-import androidx.media3.ui.PlayerView
 import com.tomfricks.hook.R
+import com.tomfricks.hook.ui.components.LoopingVideo
 import com.tomfricks.hook.ui.theme.HookMarkFlat
 import com.tomfricks.hook.ui.theme.PebbleButton
 import com.tomfricks.hook.ui.theme.PebbleTone
@@ -181,7 +166,7 @@ private fun SlidePage(slide: WelcomeSlide, playing: Boolean) {
                 modifier = mediaModifier
                     .aspectRatio(ratio = FrameAspect, matchHeightConstraintsFirst = true)
             ) {
-                SlideVideo(
+                LoopingVideo(
                     video = slide.video,
                     playing = playing,
                     modifier = Modifier.fillMaxSize()
@@ -236,69 +221,6 @@ private fun SlideFrame(
     ) {
         content()
     }
-}
-
-/**
- * A silent, looping demo clip that fills its frame edge to edge.
- *
- * ZOOM is the video equivalent of [ContentScale.Crop]: the clip is scaled until
- * both sides cover the frame and the overhang is clipped, so there is never a
- * letterbox gap between the recording and the frame around it.
- */
-@OptIn(UnstableApi::class)
-@Composable
-private fun SlideVideo(
-    @RawRes video: Int,
-    playing: Boolean,
-    modifier: Modifier = Modifier
-) {
-    val context = LocalContext.current
-    val lifecycleOwner = LocalLifecycleOwner.current
-
-    val player = remember(video) {
-        ExoPlayer.Builder(context).build().apply {
-            setMediaItem(MediaItem.fromUri("android.resource://${context.packageName}/$video".toUri()))
-            repeatMode = Player.REPEAT_MODE_ONE
-            volume = 0f
-            prepare()
-        }
-    }
-
-    // Off-screen pages stay composed, and a backgrounded app must not keep
-    // decoding frames; both are just "don't play right now".
-    DisposableEffect(player, lifecycleOwner, playing) {
-        val observer = LifecycleEventObserver { _, event ->
-            when (event) {
-                Lifecycle.Event.ON_RESUME -> player.playWhenReady = playing
-                Lifecycle.Event.ON_PAUSE -> player.playWhenReady = false
-                else -> Unit
-            }
-        }
-        player.playWhenReady = playing &&
-            lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)
-        lifecycleOwner.lifecycle.addObserver(observer)
-        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
-    }
-
-    DisposableEffect(player) {
-        onDispose { player.release() }
-    }
-
-    AndroidView(
-        modifier = modifier,
-        factory = { ctx ->
-            PlayerView(ctx).apply {
-                this.player = player
-                useController = false
-                resizeMode = AspectRatioFrameLayout.RESIZE_MODE_ZOOM
-                setShutterBackgroundColor(android.graphics.Color.TRANSPARENT)
-                layoutParams = ViewGroup.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT,
-                    ViewGroup.LayoutParams.MATCH_PARENT
-                )
-            }
-        }
-    )
 }
 
 @Composable
