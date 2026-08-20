@@ -1,6 +1,9 @@
 package com.tomfricks.hook.ui.screens.welcome
 
+import android.view.ViewGroup
 import androidx.annotation.DrawableRes
+import androidx.annotation.OptIn
+import androidx.annotation.RawRes
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Image
@@ -25,17 +28,32 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.viewinterop.AndroidView
+import androidx.core.net.toUri
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.media3.common.MediaItem
+import androidx.media3.common.Player
+import androidx.media3.common.util.UnstableApi
+import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.ui.AspectRatioFrameLayout
+import androidx.media3.ui.PlayerView
+import com.tomfricks.hook.R
 import com.tomfricks.hook.ui.theme.HookMarkFlat
 import com.tomfricks.hook.ui.theme.PebbleButton
 import com.tomfricks.hook.ui.theme.PebbleTone
@@ -52,31 +70,40 @@ private data class WelcomeSlide(
     val headline: String,
     val action: String,
     /**
-     * The looping demo for this slide. Null renders the placeholder frame, so
-     * the flow is complete and walkable before the art lands.
+     * The media for this slide. All-null renders the placeholder frame, so the
+     * flow stays walkable if art is ever missing.
      *
-     * These are stills today. Playing an animated GIF needs a decoder Compose
-     * doesn't ship with — add `io.coil-kt:coil-compose` + `io.coil-kt:coil-gif`
-     * and swap [SlideMedia]'s `Image` for Coil's `AsyncImage`; nothing else
-     * about this screen changes.
+     * [image] is drawn bare — those assets carry their own device frame, so
+     * wrapping them in [SlideFrame] would draw a second one around the first.
+     * [video] is a raw screen recording and does get the frame.
      */
-    @DrawableRes val media: Int? = null
+    @DrawableRes val image: Int? = null,
+    @RawRes val video: Int? = null
 )
 
 private val Slides = listOf(
     WelcomeSlide(
         headline = "Get more matches.\nLand more dates.",
-        action = "Get Started"
+        action = "Get Started",
+        image = R.drawable.welcome_matches
     ),
     WelcomeSlide(
         headline = "Hook is built directly\ninto your keyboard",
-        action = "Continue"
+        action = "Continue",
+        video = R.raw.welcome_keyboard
     ),
     WelcomeSlide(
         headline = "Craft the perfect opener\nto send on dating apps",
-        action = "Continue"
+        action = "Continue",
+        video = R.raw.welcome_opener
     )
 )
+
+/** Aspect of the bare slide-one artwork, which already includes its own frame. */
+private const val ImageAspect = 376f / 668f
+
+/** Aspect of the phone-shaped frame the demo recordings sit inside. */
+private const val FrameAspect = 0.5f
 
 /**
  * @param onFinished the last slide's action — hands over to onboarding, where
@@ -100,7 +127,9 @@ fun WelcomeCarousel(onFinished: () -> Unit) {
                 .fillMaxWidth()
                 .weight(1f)
         ) { page ->
-            SlidePage(Slides[page])
+            // The pager composes a neighbour ahead of time; only the slide
+            // actually on screen should be playing sound-free video.
+            SlidePage(slide = Slides[page], playing = page == pagerState.currentPage)
         }
 
         PageDots(
@@ -129,20 +158,43 @@ fun WelcomeCarousel(onFinished: () -> Unit) {
 }
 
 @Composable
-private fun SlidePage(slide: WelcomeSlide) {
+private fun SlidePage(slide: WelcomeSlide, playing: Boolean) {
     Column(
         modifier = Modifier.fillMaxSize(),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {
-        SlideMedia(
-            media = slide.media,
-            modifier = Modifier
-                .fillMaxHeight(0.62f)
-                // Height is the fixed side here: let the phone shape derive its
-                // width from it, or a wide screen stretches it into a slab.
-                .aspectRatio(ratio = 0.5f, matchHeightConstraintsFirst = true)
-        )
+        // Height is the fixed side for every slide: let the phone shape derive
+        // its width from it, or a wide screen stretches it into a slab.
+        val mediaModifier = Modifier.fillMaxHeight(0.62f)
+
+        when {
+            slide.image != null -> Image(
+                painter = painterResource(id = slide.image),
+                contentDescription = null,
+                contentScale = ContentScale.Fit,
+                modifier = mediaModifier
+                    .aspectRatio(ratio = ImageAspect, matchHeightConstraintsFirst = true)
+            )
+
+            slide.video != null -> SlideFrame(
+                modifier = mediaModifier
+                    .aspectRatio(ratio = FrameAspect, matchHeightConstraintsFirst = true)
+            ) {
+                SlideVideo(
+                    video = slide.video,
+                    playing = playing,
+                    modifier = Modifier.fillMaxSize()
+                )
+            }
+
+            else -> SlideFrame(
+                modifier = mediaModifier
+                    .aspectRatio(ratio = FrameAspect, matchHeightConstraintsFirst = true)
+            ) {
+                HookMarkFlat(size = 72.dp, contentDescription = null)
+            }
+        }
 
         Spacer(modifier = Modifier.height(40.dp))
 
@@ -159,13 +211,13 @@ private fun SlidePage(slide: WelcomeSlide) {
 }
 
 /**
- * The slide's picture, held in a phone-shaped frame so a screen recording of
- * the keyboard reads as a phone rather than as a floating rectangle.
+ * The phone-shaped frame a screen recording sits inside, so it reads as a phone
+ * rather than as a floating rectangle.
  */
 @Composable
-private fun SlideMedia(
-    @DrawableRes media: Int?,
-    modifier: Modifier = Modifier
+private fun SlideFrame(
+    modifier: Modifier = Modifier,
+    content: @Composable () -> Unit
 ) {
     val shape = RoundedCornerShape(28.dp)
     Box(
@@ -182,18 +234,71 @@ private fun SlideMedia(
             ),
         contentAlignment = Alignment.Center
     ) {
-        if (media != null) {
-            Image(
-                painter = painterResource(id = media),
-                contentDescription = null,
-                contentScale = ContentScale.Crop,
-                modifier = Modifier.fillMaxSize()
-            )
-        } else {
-            // Placeholder until the demo GIFs land.
-            HookMarkFlat(size = 72.dp, contentDescription = null)
+        content()
+    }
+}
+
+/**
+ * A silent, looping demo clip that fills its frame edge to edge.
+ *
+ * ZOOM is the video equivalent of [ContentScale.Crop]: the clip is scaled until
+ * both sides cover the frame and the overhang is clipped, so there is never a
+ * letterbox gap between the recording and the frame around it.
+ */
+@OptIn(UnstableApi::class)
+@Composable
+private fun SlideVideo(
+    @RawRes video: Int,
+    playing: Boolean,
+    modifier: Modifier = Modifier
+) {
+    val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
+
+    val player = remember(video) {
+        ExoPlayer.Builder(context).build().apply {
+            setMediaItem(MediaItem.fromUri("android.resource://${context.packageName}/$video".toUri()))
+            repeatMode = Player.REPEAT_MODE_ONE
+            volume = 0f
+            prepare()
         }
     }
+
+    // Off-screen pages stay composed, and a backgrounded app must not keep
+    // decoding frames; both are just "don't play right now".
+    DisposableEffect(player, lifecycleOwner, playing) {
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_RESUME -> player.playWhenReady = playing
+                Lifecycle.Event.ON_PAUSE -> player.playWhenReady = false
+                else -> Unit
+            }
+        }
+        player.playWhenReady = playing &&
+            lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
+    DisposableEffect(player) {
+        onDispose { player.release() }
+    }
+
+    AndroidView(
+        modifier = modifier,
+        factory = { ctx ->
+            PlayerView(ctx).apply {
+                this.player = player
+                useController = false
+                resizeMode = AspectRatioFrameLayout.RESIZE_MODE_ZOOM
+                setShutterBackgroundColor(android.graphics.Color.TRANSPARENT)
+                layoutParams = ViewGroup.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.MATCH_PARENT
+                )
+            }
+        }
+    )
 }
 
 @Composable
