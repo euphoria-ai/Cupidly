@@ -61,28 +61,42 @@ class ScreenshotDetectionService : Service() {
     }
     
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        // Play policy requires an ongoing, user-visible notification for the
+        // whole life of a FOREGROUND_SERVICE_DATA_SYNC service. Promote to the
+        // foreground on *every* start before doing anything else — including the
+        // null-intent redelivery the OS sends when it restarts a START_STICKY
+        // service, and the ACTION_STOP path. This guarantees the notification is
+        // never missing and never breaks the startForegroundService() contract
+        // (which mandates a startForeground call within ~5s of the launch).
+        startForegroundWithNotification()
+
         when (intent?.action) {
-            ACTION_START -> {
-                // For Android 14+, specify service type when starting foreground
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-                    startForeground(
-                        NOTIFICATION_ID,
-                        createNotification(),
-                        android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
-                    )
-                } else {
-                    startForeground(NOTIFICATION_ID, createNotification())
-                }
-                startScreenshotDetection()
-                isServiceRunning = true
-            }
             ACTION_STOP -> {
                 stopScreenshotDetection()
                 isServiceRunning = false
                 stopSelf()
             }
+            // ACTION_START, or a null-intent restart of the sticky service:
+            // (re)start detection and keep the notification up.
+            else -> {
+                startScreenshotDetection()
+                isServiceRunning = true
+            }
         }
         return START_STICKY
+    }
+
+    private fun startForegroundWithNotification() {
+        // For Android 14+, the service type must be passed explicitly.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            startForeground(
+                NOTIFICATION_ID,
+                createNotification(),
+                android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
+            )
+        } else {
+            startForeground(NOTIFICATION_ID, createNotification())
+        }
     }
     
     override fun onBind(intent: Intent?): IBinder? = null
@@ -95,6 +109,9 @@ class ScreenshotDetectionService : Service() {
     }
     
     private fun startScreenshotDetection() {
+        // Already watching — a sticky restart must not stack a second observer.
+        if (screenshotObserver != null) return
+
         // Monitor external storage for new screenshots
         val handler = Handler(Looper.getMainLooper())
         
