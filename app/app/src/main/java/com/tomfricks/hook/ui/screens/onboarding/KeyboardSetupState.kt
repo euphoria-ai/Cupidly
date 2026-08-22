@@ -32,6 +32,8 @@ data class KeyboardSetup(
     val selected: Boolean,
     /** Hook may read the screenshots the user takes. */
     val photos: Boolean,
+    /** Hook may post notifications — what makes the watcher visible while it runs. */
+    val notifications: Boolean = false,
     /** Hook's own keyboard view is on screen right now. */
     val showing: Boolean
 ) {
@@ -116,5 +118,6 @@ private fun readKeyboardSetup(context: Context) = KeyboardSetup(
     enabled = PermissionUtils.isKeyboardEnabled(context),
     selected = PermissionUtils.isKeyboardSelected(context),
     photos = PermissionUtils.hasPhotoAccess(context),
+    notifications = PermissionUtils.hasNotificationAccess(context),
     showing = false
 )

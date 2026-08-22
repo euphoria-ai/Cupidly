@@ -449,10 +449,15 @@ private fun EnableKeyboardStep(
     val context = LocalContext.current
     val setup = rememberKeyboardSetup()
     var photoAsked by remember { mutableStateOf(false) }
+    var notificationsAsked by remember { mutableStateOf(false) }
 
     val photoLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission()
     ) { photoAsked = true }
+
+    val notificationLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { notificationsAsked = true }
 
     val tasks = listOf(
         SetupTask(
@@ -485,6 +490,27 @@ private fun EnableKeyboardStep(
                     PermissionUtils.openAppSettings(context)
                 } else {
                     photoLauncher.launch(PermissionUtils.photoPermission)
+                }
+            }
+        ),
+        SetupTask(
+            title = "Keep the Hook notification on",
+            detail = if (notificationsAsked && !setup.notifications) {
+                "Android said no — tap to open Hook's notification settings"
+            } else {
+                "Hook watches for screenshots while you're in another app, and " +
+                    "Android only lets it while a notification says so"
+            },
+            done = setup.notifications,
+            action = "Allow Notifications",
+            // Below Android 13 there is no dialog to show, and after a refusal
+            // there is no longer one — either way, settings is the only route.
+            onAction = {
+                val permission = PermissionUtils.notificationPermission
+                if (permission != null && !notificationsAsked) {
+                    notificationLauncher.launch(permission)
+                } else {
+                    PermissionUtils.openNotificationSettings(context)
                 }
             }
         )
