@@ -32,6 +32,8 @@ data class KeyboardSetup(
     val selected: Boolean,
     /** Hook may read the screenshots the user takes. */
     val photos: Boolean,
+    /** Android will show the foreground-service notification. */
+    val notifications: Boolean,
     /** Hook's own keyboard view is on screen right now. */
     val showing: Boolean
 ) {
@@ -68,7 +70,7 @@ fun rememberKeyboardSetup(): KeyboardSetup {
     fun refresh(reason: String) {
         val fresh = readKeyboardSetup(context)
         if (fresh != polled) {
-            Log.d(TAG, "$reason: enabled=${fresh.enabled} selected=${fresh.selected} photos=${fresh.photos}")
+            Log.d(TAG, "$reason: enabled=${fresh.enabled} selected=${fresh.selected} photos=${fresh.photos} notifications=${fresh.notifications}")
             polled = fresh
         }
     }
@@ -116,5 +118,6 @@ private fun readKeyboardSetup(context: Context) = KeyboardSetup(
     enabled = PermissionUtils.isKeyboardEnabled(context),
     selected = PermissionUtils.isKeyboardSelected(context),
     photos = PermissionUtils.hasPhotoAccess(context),
+    notifications = PermissionUtils.hasNotificationAccess(context),
     showing = false
 )

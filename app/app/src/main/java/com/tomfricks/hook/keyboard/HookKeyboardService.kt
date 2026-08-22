@@ -2,7 +2,6 @@ package com.tomfricks.hook.keyboard
 
 import android.content.Intent
 import android.inputmethodservice.InputMethodService
-import android.os.Build
 import android.util.Log
 import android.view.View
 import android.view.inputmethod.EditorInfo
@@ -26,8 +25,10 @@ import com.tomfricks.hook.data.PreferencesRepository
 import com.tomfricks.hook.data.ThemeMode
 import com.tomfricks.hook.data.UserPreferences
 import com.tomfricks.hook.service.ScreenshotDetectionService
+import com.tomfricks.hook.service.ScreenshotScanner
 import com.tomfricks.hook.ui.keyboard.KeyboardPanel
 import com.tomfricks.hook.ui.theme.HookTheme
+import com.tomfricks.hook.utils.PermissionUtils
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -36,6 +37,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 class HookKeyboardService : InputMethodService(), LifecycleOwner {
 
@@ -70,8 +72,7 @@ class HookKeyboardService : InputMethodService(), LifecycleOwner {
         // id for the X-App-User-Id header.
         apiService = ApiService(this)
 
-        // Start screenshot detection service
-        startScreenshotDetectionService()
+        ScreenshotDetectionService.startIfAllowed(this)
 
         lifecycleOwner.onCreate()
     }
@@ -149,12 +150,23 @@ class HookKeyboardService : InputMethodService(), LifecycleOwner {
         // generated in the meantime is kept; only a stale round is dropped.
         RizzSession.clearIfStale()
 
-        // Android shows and re-shows the IME constantly — every field focus,
-        // every return from another app, and notably the moment a picked reply
-        // is committed. So this may *only* pick up a screenshot that has never
-        // had its round: the claim returns null in every other case, and the
-        // keyboard stays idle until the user takes another screenshot.
-        RizzSession.claimForScreenshot()?.let { generateReplies(it) }
+        // Permission may have been granted since onCreate; try again. If it
+        // is still denied, pick up a screenshot taken while the keyboard was
+        // down — without running an invisible foreground service.
+        if (!ScreenshotDetectionService.startIfAllowed(this)) {
+            if (PermissionUtils.hasPhotoAccess(this)) {
+                serviceScope.launch(Dispatchers.IO) {
+                    val bitmap = ScreenshotScanner.consumeLatest(this@HookKeyboardService)
+                        ?: return@launch
+                    withContext(Dispatchers.Main) {
+                        RizzSession.onScreenshot(bitmap)
+                        RizzSession.claimForScreenshot()?.let { generateReplies(it) }
+                    }
+                }
+            }
+        } else {
+            RizzSession.claimForScreenshot()?.let { generateReplies(it) }
+        }
     }
 
     override fun onFinishInputView(finishingInput: Boolean) {
@@ -167,7 +179,7 @@ class HookKeyboardService : InputMethodService(), LifecycleOwner {
         super.onDestroy()
         _isShowing.value = false
         lifecycleOwner.onDestroy()
-        stopScreenshotService()
+        ScreenshotDetectionService.stop(this)
     }
 
     /**
@@ -181,17 +193,6 @@ class HookKeyboardService : InputMethodService(), LifecycleOwner {
             generateReplies(generation)
         } else if (!RizzSession.isGenerating) {
             RizzSession.onUnstartable(ReplyError.NO_SCREENSHOT)
-        }
-    }
-
-    private fun startScreenshotDetectionService() {
-        val intent = Intent(this, ScreenshotDetectionService::class.java).apply {
-            action = ScreenshotDetectionService.ACTION_START
-        }
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            startForegroundService(intent)
-        } else {
-            startService(intent)
         }
     }
 
@@ -303,12 +304,5 @@ class HookKeyboardService : InputMethodService(), LifecycleOwner {
 
     private fun onBackspaceClicked() {
         currentInputConnection?.deleteSurroundingText(1, 0)
-    }
-
-    private fun stopScreenshotService() {
-        val intent = Intent(this, ScreenshotDetectionService::class.java).apply {
-            action = ScreenshotDetectionService.ACTION_STOP
-        }
-        startService(intent)
     }
 }

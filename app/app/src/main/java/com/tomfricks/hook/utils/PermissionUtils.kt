@@ -29,6 +29,24 @@ object PermissionUtils {
         ContextCompat.checkSelfPermission(context, photoPermission) ==
             PackageManager.PERMISSION_GRANTED
 
+    /**
+     * The permission that lets the screenshot-detection foreground service
+     * post its ongoing "Hook is active" notification. Below 13 the permission
+     * does not exist and notifications are allowed by default.
+     */
+    val needsNotificationPermission: Boolean
+        get() = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU
+
+    val notificationPermission: String
+        get() = Manifest.permission.POST_NOTIFICATIONS
+
+    /** True once Android will actually show the foreground-service notification. */
+    fun hasNotificationAccess(context: Context): Boolean {
+        if (!needsNotificationPermission) return true
+        return ContextCompat.checkSelfPermission(context, notificationPermission) ==
+            PackageManager.PERMISSION_GRANTED
+    }
+
     /** Hook's own entry in the system app-settings screen. */
     fun openAppSettings(context: Context) {
         val intent = Intent(
