@@ -3,6 +3,7 @@ package com.tomfricks.hook.service
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import android.app.PendingIntent
 import android.app.Service
 import android.content.ClipboardManager
 import android.content.Context
@@ -19,6 +20,8 @@ import android.os.Looper
 import android.provider.MediaStore
 import android.util.Log
 import androidx.core.app.NotificationCompat
+import com.tomfricks.hook.MainActivity
+import com.tomfricks.hook.R
 import com.tomfricks.hook.api.ApiService
 import com.tomfricks.hook.api.GenerateRepliesResult
 import com.tomfricks.hook.api.ReplyError
@@ -339,12 +342,31 @@ class ScreenshotDetectionService : Service() {
     }
     
     private fun createNotification(): Notification {
+        // Tapping the notification should land somewhere, and "somewhere" is
+        // Hook itself. FLAG_IMMUTABLE is required from Android 12 on; the
+        // update flag keeps the one PendingIntent rather than stacking copies.
+        val contentIntent = PendingIntent.getActivity(
+            this,
+            0,
+            Intent(this, MainActivity::class.java).apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+            },
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
+
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("Hook is active")
             .setContentText("Take a screenshot for automatic AI replies")
-            .setSmallIcon(android.R.drawable.ic_dialog_info)
+            .setSmallIcon(R.drawable.ic_heart)
             .setPriority(NotificationCompat.PRIORITY_LOW)
+            .setContentIntent(contentIntent)
             .setOngoing(true)
+            // Play allows this foreground service only because a notification
+            // makes the work noticeable — so it has to actually appear. Android
+            // otherwise holds a foreground service's notification back for
+            // about ten seconds, which for a short-lived service means the user
+            // sees nothing at all.
+            .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
             .build()
     }
 }
