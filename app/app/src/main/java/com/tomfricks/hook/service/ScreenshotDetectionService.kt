@@ -4,38 +4,33 @@ import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.Service
-import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.database.ContentObserver
 import android.graphics.Bitmap
-import android.graphics.BitmapFactory
 import android.net.Uri
 import android.os.Build
-import android.os.FileObserver
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
 import android.provider.MediaStore
 import android.util.Log
 import androidx.core.app.NotificationCompat
+import com.tomfricks.hook.R
 import com.tomfricks.hook.api.ApiService
 import com.tomfricks.hook.api.GenerateRepliesResult
 import com.tomfricks.hook.api.ReplyError
 import com.tomfricks.hook.keyboard.ConversationSession
 import com.tomfricks.hook.data.PreferencesRepository
-import com.tomfricks.hook.data.UserPreferences
 import com.tomfricks.hook.keyboard.RizzSession
+import com.tomfricks.hook.utils.PermissionUtils
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.first
-import java.io.File
 
 class ScreenshotDetectionService : Service() {
     
     private var screenshotObserver: ContentObserver? = null
     private val serviceScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
-    private var lastScreenshotPath: String? = null
-    private var lastScreenshotTime: Long = 0
     private lateinit var preferencesRepository: PreferencesRepository
     private lateinit var apiService: ApiService
     
@@ -44,12 +39,41 @@ class ScreenshotDetectionService : Service() {
         const val ACTION_STOP = "com.tomfricks.hook.ACTION_STOP_DETECTION"
         
         private const val NOTIFICATION_ID = 2001
-        private const val CHANNEL_ID = "screenshot_detection"
+        // New id: existing installs already created the old channel at IMPORTANCE_LOW,
+        // and Android will not raise that after the fact.
+        private const val CHANNEL_ID = "screenshot_detection_v2"
         
         var onScreenshotDetected: ((Bitmap) -> Unit)? = null
         var onAutoReplyGenerated: ((List<String>) -> Unit)? = null
         var onAutoReplyFailed: ((String) -> Unit)? = null
         var isServiceRunning = false
+
+        /**
+         * Starts the foreground watcher only when Android will actually show
+         * its notification. Play forbids a dataSync FGS that the user cannot
+         * see. Returns false and does nothing if notification access is missing.
+         */
+        fun startIfAllowed(context: Context): Boolean {
+            if (!PermissionUtils.hasNotificationAccess(context)) return false
+            if (!PermissionUtils.isKeyboardSelected(context)) return false
+            if (isServiceRunning) return true
+            val intent = Intent(context, ScreenshotDetectionService::class.java).apply {
+                action = ACTION_START
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                context.startForegroundService(intent)
+            } else {
+                context.startService(intent)
+            }
+            return true
+        }
+
+        fun stop(context: Context) {
+            val intent = Intent(context, ScreenshotDetectionService::class.java).apply {
+                action = ACTION_STOP
+            }
+            context.startService(intent)
+        }
     }
     
     override fun onCreate() {
@@ -63,7 +87,8 @@ class ScreenshotDetectionService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
             ACTION_START -> {
-                // For Android 14+, specify service type when starting foreground
+                // startForeground must run if we were started with
+                // startForegroundService, even when we are about to stop.
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
                     startForeground(
                         NOTIFICATION_ID,
@@ -72,6 +97,12 @@ class ScreenshotDetectionService : Service() {
                     )
                 } else {
                     startForeground(NOTIFICATION_ID, createNotification())
+                }
+                if (!PermissionUtils.hasNotificationAccess(this)) {
+                    stopForeground(STOP_FOREGROUND_REMOVE)
+                    isServiceRunning = false
+                    stopSelf()
+                    return START_NOT_STICKY
                 }
                 startScreenshotDetection()
                 isServiceRunning = true
@@ -117,113 +148,17 @@ class ScreenshotDetectionService : Service() {
     
     private fun detectScreenshot(uri: Uri) {
         serviceScope.launch(Dispatchers.IO) {
-            try {
-                val projection = arrayOf(
-                    MediaStore.Images.Media.DATA,
-                    MediaStore.Images.Media.DATE_ADDED
-                )
-                
-                contentResolver.query(uri, projection, null, null, null)?.use { cursor ->
-                    if (cursor.moveToFirst()) {
-                        val pathIndex = cursor.getColumnIndex(MediaStore.Images.Media.DATA)
-                        val dateIndex = cursor.getColumnIndex(MediaStore.Images.Media.DATE_ADDED)
-                        
-                        if (pathIndex >= 0 && dateIndex >= 0) {
-                            val path = cursor.getString(pathIndex)
-                            val dateAdded = cursor.getLong(dateIndex) * 1000
-                            
-                            // MediaStore announces the file while it is still being
-                            // written (".pending-…"); reading it then throws EACCES.
-                            if (File(path).name.startsWith(".pending-")) {
-                                return@use
-                            }
-
-                            // Check if it's a screenshot (contains "screenshot" in path)
-                            if (path.lowercase().contains("screenshot") ||
-                                path.lowercase().contains("screen shot") ||
-                                path.lowercase().contains("screen_shot")) {
-                                
-                                // Avoid processing same screenshot twice
-                                // Window is generous: MediaStore can announce the
-                                // finalized file several seconds after capture.
-                                if (path != lastScreenshotPath &&
-                                    System.currentTimeMillis() - dateAdded < 20000) {
-                                    
-                                    lastScreenshotPath = path
-                                    lastScreenshotTime = System.currentTimeMillis()
-                                    
-                                    // Load and process screenshot
-                                    val bitmap = loadScreenshot(path)
-                                    if (bitmap != null) {
-                                        // Record the round centrally first, so it
-                                        // survives with or without a live keyboard.
-                                        // One screenshot buys exactly one round:
-                                        // a null claim means the keyboard got
-                                        // there first (it claims on show, for
-                                        // screenshots taken while the app was
-                                        // cold), and the same image is never
-                                        // generated from twice.
-                                        val generation = withContext(Dispatchers.Main) {
-                                            RizzSession.onScreenshot(bitmap)
-                                            onScreenshotDetected?.invoke(bitmap)
-                                            RizzSession.claimForScreenshot()
-                                        }
-                                        if (generation != null) {
-                                            generateAutoReplies(generation)
-                                        }
-
-                                        Log.d("ScreenshotDetection", "Screenshot detected and processed: $path")
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            } catch (e: Exception) {
-                Log.e("ScreenshotDetection", "Error detecting screenshot", e)
+            val bitmap = ScreenshotScanner.consume(this@ScreenshotDetectionService, uri) ?: return@launch
+            val generation = withContext(Dispatchers.Main) {
+                RizzSession.onScreenshot(bitmap)
+                onScreenshotDetected?.invoke(bitmap)
+                RizzSession.claimForScreenshot()
             }
-        }
-    }
-    
-    private fun loadScreenshot(path: String): Bitmap? {
-        return try {
-            val file = File(path)
-            if (file.exists()) {
-                // Load bitmap with size optimization
-                val options = BitmapFactory.Options().apply {
-                    inJustDecodeBounds = true
-                }
-                BitmapFactory.decodeFile(path, options)
-                
-                // Calculate sample size to reduce memory usage
-                options.inSampleSize = calculateInSampleSize(options, 1080, 1920)
-                options.inJustDecodeBounds = false
-                
-                BitmapFactory.decodeFile(path, options)
-            } else {
-                null
+            if (generation != null) {
+                generateAutoReplies(generation)
             }
-        } catch (e: Exception) {
-            Log.e("ScreenshotDetection", "Error loading screenshot", e)
-            null
+            Log.d("ScreenshotDetection", "Screenshot detected and processed")
         }
-    }
-    
-    private fun calculateInSampleSize(options: BitmapFactory.Options, reqWidth: Int, reqHeight: Int): Int {
-        val height = options.outHeight
-        val width = options.outWidth
-        var inSampleSize = 1
-        
-        if (height > reqHeight || width > reqWidth) {
-            val halfHeight = height / 2
-            val halfWidth = width / 2
-            
-            while (halfHeight / inSampleSize >= reqHeight && halfWidth / inSampleSize >= reqWidth) {
-                inSampleSize *= 2
-            }
-        }
-        
-        return inSampleSize
     }
     
     private fun stopScreenshotDetection() {
@@ -238,9 +173,11 @@ class ScreenshotDetectionService : Service() {
             val channel = NotificationChannel(
                 CHANNEL_ID,
                 "Hook Screenshot Detection",
-                NotificationManager.IMPORTANCE_LOW
+                NotificationManager.IMPORTANCE_DEFAULT
             ).apply {
-                description = "Detects screenshots for AI reply generation"
+                description = "Shown while Hook watches for screenshots so it can write replies"
+                setSound(null, null)
+                enableVibration(false)
             }
             
             val manager = getSystemService(NotificationManager::class.java)
@@ -325,9 +262,12 @@ class ScreenshotDetectionService : Service() {
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("Hook is active")
             .setContentText("Take a screenshot for automatic AI replies")
-            .setSmallIcon(android.R.drawable.ic_dialog_info)
-            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .setSmallIcon(R.drawable.ic_heart)
+            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+            .setCategory(NotificationCompat.CATEGORY_SERVICE)
             .setOngoing(true)
+            .setSilent(true)
+            .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
             .build()
     }
 }

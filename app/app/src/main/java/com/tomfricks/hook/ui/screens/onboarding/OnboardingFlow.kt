@@ -60,6 +60,7 @@ import com.tomfricks.hook.data.OnboardingSync
 import com.tomfricks.hook.data.PreferencesRepository
 import com.tomfricks.hook.data.ProfileQuestions
 import com.tomfricks.hook.data.StyleQuestions
+import com.tomfricks.hook.service.ScreenshotDetectionService
 import com.tomfricks.hook.ui.theme.PebbleButton
 import com.tomfricks.hook.ui.theme.PebbleDialog
 import com.tomfricks.hook.ui.theme.PebbleOption
@@ -92,7 +93,7 @@ private sealed interface Step {
         override val key: String get() = question.field.name
     }
 
-    /** The system setup: enable the keyboard, switch to it, allow photos. */
+    /** The system setup: enable the keyboard, switch to it, allow photos and notifications. */
     data object EnableKeyboard : Step {
         override val key = "keyboard"
     }
@@ -449,46 +450,85 @@ private fun EnableKeyboardStep(
     val context = LocalContext.current
     val setup = rememberKeyboardSetup()
     var photoAsked by remember { mutableStateOf(false) }
+    var notificationAsked by remember { mutableStateOf(false) }
 
     val photoLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission()
     ) { photoAsked = true }
 
-    val tasks = listOf(
-        SetupTask(
-            title = "Turn on the Hook keyboard",
-            detail = "In Settings, under on-screen keyboards",
-            done = setup.enabled,
-            action = "Open Settings",
-            onAction = { PermissionUtils.openKeyboardSettings(context) }
-        ),
-        SetupTask(
-            title = "Switch to Hook",
-            detail = "Pick Hook from the keyboard chooser",
-            done = setup.selected,
-            action = "Choose Hook",
-            onAction = { PermissionUtils.showKeyboardPicker(context) }
-        ),
-        SetupTask(
-            title = "Allow access to your photos",
-            detail = if (photoAsked && !setup.photos) {
-                "Android said no — tap to open Hook's settings and allow photos"
-            } else {
-                "So Hook can read the screenshots you take"
-            },
-            done = setup.photos,
-            action = "Allow Photo Access",
-            // A second refusal makes the system dialog stop appearing at all,
-            // so from then on the only way through is app settings.
-            onAction = {
-                if (photoAsked && !setup.photos) {
-                    PermissionUtils.openAppSettings(context)
-                } else {
-                    photoLauncher.launch(PermissionUtils.photoPermission)
-                }
-            }
+    val notificationLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        notificationAsked = true
+        if (granted) ScreenshotDetectionService.startIfAllowed(context)
+    }
+
+    LaunchedEffect(setup.notifications, setup.selected) {
+        if (setup.notifications && setup.selected) {
+            ScreenshotDetectionService.startIfAllowed(context)
+        }
+    }
+
+    val tasks = buildList {
+        add(
+            SetupTask(
+                title = "Turn on the Hook keyboard",
+                detail = "In Settings, under on-screen keyboards",
+                done = setup.enabled,
+                action = "Open Settings",
+                onAction = { PermissionUtils.openKeyboardSettings(context) }
+            )
         )
-    )
+        add(
+            SetupTask(
+                title = "Switch to Hook",
+                detail = "Pick Hook from the keyboard chooser",
+                done = setup.selected,
+                action = "Choose Hook",
+                onAction = { PermissionUtils.showKeyboardPicker(context) }
+            )
+        )
+        add(
+            SetupTask(
+                title = "Allow access to your photos",
+                detail = if (photoAsked && !setup.photos) {
+                    "Android said no — tap to open Hook's settings and allow photos"
+                } else {
+                    "So Hook can read the screenshots you take"
+                },
+                done = setup.photos,
+                action = "Allow Photo Access",
+                onAction = {
+                    if (photoAsked && !setup.photos) {
+                        PermissionUtils.openAppSettings(context)
+                    } else {
+                        photoLauncher.launch(PermissionUtils.photoPermission)
+                    }
+                }
+            )
+        )
+        if (PermissionUtils.needsNotificationPermission) {
+            add(
+                SetupTask(
+                    title = "Allow notifications",
+                    detail = if (notificationAsked && !setup.notifications) {
+                        "Android said no — tap to open Hook's settings and allow notifications"
+                    } else {
+                        "So you can see when Hook is watching for screenshots"
+                    },
+                    done = setup.notifications,
+                    action = "Allow Notifications",
+                    onAction = {
+                        if (notificationAsked && !setup.notifications) {
+                            PermissionUtils.openAppSettings(context)
+                        } else {
+                            notificationLauncher.launch(PermissionUtils.notificationPermission)
+                        }
+                    }
+                )
+            )
+        }
+    }
     val nextIndex = tasks.indexOfFirst { !it.done }
     val next = tasks.getOrNull(nextIndex)
 
