@@ -4,6 +4,7 @@ Nothing here touches the network. Env is stubbed before importing main so a
 developer .env cannot leak into assertions.
 """
 
+import json
 import os
 import tempfile
 
@@ -18,6 +19,7 @@ os.environ.setdefault(
 )
 os.environ.pop("SUPABASE_URL", None)
 os.environ.pop("SUPABASE_SERVICE_ROLE_KEY", None)
+os.environ.pop("GEMINI_API_KEY", None)
 
 import main  # noqa: E402
 from main import (  # noqa: E402
@@ -25,6 +27,7 @@ from main import (  # noqa: E402
     UserPreferences,
     build_context_block,
     build_prompt,
+    parse_suggestions,
     retry_after_seconds,
     strip_reasoning,
 )
@@ -60,6 +63,24 @@ def test_strip_reasoning_combines_think_block_and_fence():
         "```"
     )
     assert strip_reasoning(raw) == '{"suggestion_1": "a", "suggestion_2": "b"}'
+
+
+def test_parse_suggestions_reads_three_replies_and_summary():
+    text = json.dumps({
+        "suggestion_1": "a",
+        "suggestion_2": "b",
+        "suggestion_3": "c",
+        "updated_context_summary": "They are planning Friday drinks.",
+    })
+    suggestions, summary = parse_suggestions(text)
+    assert suggestions == ["a", "b", "c"]
+    assert summary == "They are planning Friday drinks."
+
+
+def test_parse_suggestions_rejects_incomplete_payload():
+    suggestions, summary = parse_suggestions('{"suggestion_1": "a"}')
+    assert suggestions == []
+    assert summary == ""
 
 
 # --- retry_after_seconds -------------------------------------------------
